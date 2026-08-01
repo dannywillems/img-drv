@@ -1,7 +1,7 @@
 # img-drv
 
 A portable, content-addressed **intermediate representation for reproducible
-build descriptions**, with thin embedded DSLs in **Go, OCaml and Rust**.
+build descriptions**, with thin embedded DSLs in **Go, OCaml, Rust and Python**.
 
 Nothing is built yet. This repository currently holds a thesis, a plan to
 falsify it cheaply, and the mathematics that constrains the design.
@@ -54,18 +54,24 @@ project.
 ## Why three languages, and why these three
 
 Portability is the claim under test, so the eDSLs are the experiment, not the
-product. One engine, three front-ends.
+product. One engine, four front-ends, chosen to span the axis from "no static
+types" to "very strong static types".
 
 - **OCaml** carries the reference implementation and the normalizer. Sum types
   and exhaustiveness checking are what make a canonical serialization spec
   pleasant to get exactly right.
 - **Rust** carries the tooling, and is the path to embedding a builder
   (Snix) later if we ever want one of our own.
-- **Go** is the **falsification test**, and the most important of the three.
+- **Go** is the **falsification test**, and the most important of the four.
   It has no sum types, no higher-kinded types, and minimal generics. If the
   signature needs anything beyond finite products, Go is where it breaks.
   A clean Go embedding is the empirical evidence for the theory in
   [`docs/theory.md`](docs/theory.md); an ugly one is the refutation.
+- **Python** is the readable one, and it probes the other end of the axis:
+  gradual typing, so it shows the minimum surface the signature needs when the
+  type system is not helping at all. It is also the fastest to iterate on while
+  the spec is still moving, and the best language to read the spec back out of,
+  which is why it goes first in Phase 1.
 
 ## Layout
 
@@ -74,7 +80,8 @@ docs/theory.md          why finite products suffice, and what that forces
 docs/nix-internals.md   how Nix actually works, with sources
 docs/learning-nix.md    a path to learning Nix properly, in order
 docs/plan.md            phases, with a falsifiable MVP
-docs/spec/              the IR signature and canonical serialization
+docs/spec/              the IR signature and canonical serialization,
+                        with golden .drv files from real Nix
 ```
 
 ## Status

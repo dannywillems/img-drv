@@ -6,7 +6,7 @@ to until they land.
 
 ## Thesis, stated so it can fail
 
-> The same build intent, expressed in Go, OCaml and Rust through a
+> The same build intent, expressed in Python, Go, OCaml and Rust through a
 > first-order signature, serializes to BYTE-IDENTICAL intermediate
 > representation, and that IR is accepted by an existing Nix builder as a valid
 > derivation.
@@ -24,21 +24,27 @@ Two ways it fails, and both are informative:
 
 Deliverable: `docs/spec/`, versioned, normative.
 
-- [ ] The signature. First-order only: strings, integers, paths, lists,
-      records, references. No floats. Justify anything else against
-      `theory.md` section 1.
-- [ ] Canonical serialization: key ordering, integer encoding, string
-      normalization and escaping, list versus set semantics, how references are
-      encoded.
-- [ ] The hash: what exactly is hashed, in what encoding.
-- [ ] A worked example, by hand, of one trivial derivation, in full.
+- [x] The signature. See `docs/spec/signature.md`.
+- [x] Canonical serialization: field order, sorting, escaping. Derived
+      EMPIRICALLY from real Nix rather than guessed, and recorded with the
+      probes that established each rule. See `docs/spec/canonical.md`.
+- [x] Golden files from real Nix for five cases. See `docs/spec/examples/`.
+- [ ] **The hash. STILL OPEN, and it blocks Phase 1.** Store path computation
+      (the `output:out:sha256:...` fingerprint and Nix's base-32 encoding) is
+      not yet verified. Until it is, an implementation can emit a derivation
+      with the right shape and wrong paths, which looks correct and is not.
 
 Exit test: a human can serialize the worked example with a pencil and get the
-documented bytes.
+documented bytes. Currently reachable for everything EXCEPT the store paths.
 
-## Phase 1: OCaml reference, and a real build (1 to 2 weeks)
+## Phase 1: Python first, then OCaml, and a real build (1 to 2 weeks)
 
-OCaml first because sum types and exhaustiveness make the normalizer honest.
+Python first because the spec is still moving and Python is the cheapest place
+to discover that a rule is wrong. It doubles as executable documentation: the
+serializer should read like `canonical.md`.
+
+OCaml second, as the typed reference, because sum types and exhaustiveness are
+what make the normalizer honest once the rules have stopped changing.
 
 - [ ] eDSL producing the IR value.
 - [ ] Canonical serializer.
@@ -55,6 +61,11 @@ inherit the sandbox, the store, garbage collection and every substituter,
 without owning any of them.
 
 ## Phase 2: Rust and Go, and the conformance suite (1 to 2 weeks)
+
+Four implementations now span the typing axis end to end: Python (gradual),
+Go (weak static), Rust (strong static), OCaml (strong static with inference).
+If all four agree byte for byte, the portability claim is as well supported as
+this kind of claim can be.
 
 - [ ] Golden-file conformance suite: a set of intents, each with its expected
       canonical bytes and hash, language-independent.

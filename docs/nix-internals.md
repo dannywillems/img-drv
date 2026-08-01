@@ -99,11 +99,13 @@ Source: <https://snix.dev/blog/announcing-snix/>, <https://tvix.dev/>
 
 ## Open questions to resolve before Phase 1
 
-- [ ] Exact ATerm grammar and escaping rules, field by field.
+- [x] Exact ATerm grammar and escaping rules, field by field. DONE, and
+      derived empirically because the manual does not publish the grammar.
+      See `spec/canonical.md`.
 - [ ] Exact store path hash computation for input-addressed derivations,
       including the `output:out:sha256:...` style fingerprint strings.
-- [ ] How `inputDrvs` names outputs, and what a multi-output dependency looks
-      like on the wire.
+- [x] How `inputDrvs` names outputs: `(drvPath, [outputNames])`. Multi-entry
+      sort order is still open.
 - [ ] Whether `nix-instantiate` output is byte-stable across Nix versions, and
       which version we pin as the differential oracle.
 - [ ] Whether to target the Nix daemon protocol or simply write `.drv` files

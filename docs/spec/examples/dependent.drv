@@ -1,0 +1,1 @@
+Derive([("out","/nix/store/43pszy923kd331lmx2jzgv9dcpr5xfpj-dependent","","")],[("/nix/store/k1lc1y192xiajlyy4zvsdnfprnjx32i3-dep-a.drv",["out"])],[],"x86_64-linux","/bin/sh",["-c","cat /nix/store/dwswyqa4sqqfbzikhsyjjw654bv2wslb-dep-a > $out"],[("builder","/bin/sh"),("name","dependent"),("out","/nix/store/43pszy923kd331lmx2jzgv9dcpr5xfpj-dependent"),("system","x86_64-linux")])
