@@ -1,0 +1,30 @@
+# Build artifacts
+/target/
+_build/
+dist/
+build/
+
+# Go
+/bin/
+
+# OCaml
+*.install
+.merlin
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+
+# Environment
+.env
+.env.local
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
