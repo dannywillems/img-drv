@@ -46,9 +46,11 @@ serializer should read like `canonical.md`.
 OCaml second, as the typed reference, because sum types and exhaustiveness are
 what make the normalizer honest once the rules have stopped changing.
 
-- [ ] eDSL producing the IR value.
+- [ ] eDSL producing the IR value, fully typed (`mypy --strict` clean).
 - [ ] Canonical serializer.
 - [ ] ATerm emitter producing a `.drv`.
+- [ ] `ci.yml` running the Python jobs through Makefile targets.
+- [ ] `impl/python/README.md` and the first real-world example.
 - [ ] Hand it to an existing Nix store and build something trivial.
 - [ ] **Differential oracle**: the same package written in the Nix language,
       instantiated with `nix-instantiate`, compared byte-for-byte with ours.
@@ -70,8 +72,12 @@ this kind of claim can be.
 - [ ] Golden-file conformance suite: a set of intents, each with its expected
       canonical bytes and hash, language-independent. Seeded by
       `docs/spec/examples/`, which already holds five cases from real Nix.
-- [ ] Rust eDSL passing it.
-- [ ] Go eDSL passing it.
+- [ ] Rust eDSL passing it, `deny(warnings)`, newtypes, no `unwrap`.
+- [ ] Go eDSL passing it, no `any` in the signature.
+- [ ] CI matrix covering all four pinned toolchains.
+- [ ] Per-language docs, and the typing table recording which invariants each
+      type system makes unrepresentable.
+- [ ] The six real-world examples, in all four languages, byte-identical.
 
 Go is the **falsification test**, not a fourth port. It has no sum types, no
 higher-kinded types, minimal generics. If the signature needs more than finite
@@ -79,6 +85,118 @@ products, this is where it shows. Record honestly how ugly it gets; that
 ugliness is the experimental result.
 
 Exit test: all four emit identical bytes for every case in the suite.
+
+## Engineering baseline (runs alongside every phase)
+
+Not a phase, because none of it can be deferred to the end without becoming a
+rewrite. Each phase adds its language's slice of all four.
+
+### Toolchain: latest stable, pinned, and bumped deliberately
+
+Every implementation targets the LATEST STABLE release of its language, pinned
+in a file, and CI uses that same pin. Versions verified upstream on
+2026-08-01:
+
+| language | version | pinned in |
+| --- | --- | --- |
+| Python | 3.14.6 | `.python-version` |
+| Go | 1.26.5 | `go.mod` |
+| Rust | 1.97.1 | `rust-toolchain.toml` |
+| OCaml | 5.5.0 | `dune-project` / opam switch |
+
+Rule: no floor-version ranges, no "whatever is installed". A version moves in
+its own commit, with the diff readable, exactly as `iso-img` treats pins. A
+project whose entire subject is reproducibility cannot have a fuzzy toolchain.
+
+### Typing: as strong as each language permits, enforced in CI
+
+The point of four languages is to span the typing axis, which only means
+something if each implementation is as typed as its language ALLOWS. A
+dynamically-typed Python implementation would make the comparison meaningless.
+
+- **Python**: full annotations on every function and field; `mypy --strict`
+  passing, with no `Any` in the public surface and no bare `dict`/`list`.
+  Prefer `@dataclass(frozen=True)` and `Literal`/`Enum` over strings, and
+  `TypedDict` or explicit classes over free-form mappings.
+- **Go**: no `interface{}`/`any` in the signature. Named types over bare
+  `string` for `OutputName`, `StorePath`, `System`. Where the signature needs a
+  sum, model it explicitly (a sealed interface, or a struct with a discriminant
+  plus a constructor per case) and RECORD how bad it is; that discomfort is the
+  falsification test doing its job.
+- **Rust**: `#![deny(warnings)]`, newtypes rather than `String` aliases,
+  `enum` for every sum, no `unwrap` outside tests.
+- **OCaml**: abstract types in `.mli` files so invalid values are
+  unconstructible, variants for every sum, warnings as errors.
+
+The interesting result to record: WHICH invariants from `spec/signature.md`
+each type system can make unrepresentable, and which have to stay runtime
+checks. That table is a genuine research output, not bookkeeping.
+
+### CI: GitHub Actions, every check through a Makefile target
+
+CI never invokes a raw tool. Every job calls `make <target>` so that a local
+run and a CI run are identical, and the Makefile is the single answer to "how
+do I run X".
+
+- `ci.yml`: per-language `build`, `lint`, `typecheck`, `test`, run on a matrix
+  of the pinned versions; plus `conformance` and `differential` once they
+  exist.
+- `pr-hygiene.yaml`: PR size, commit title length, no fixup commits, commit
+  bodies for large changes (scripts from the toolbox repo).
+- `changelog.yaml`: changelog hygiene, dedicated commits, valid hashes.
+- `shellcheck.yaml`: every shell script.
+- Actions pinned to a full commit SHA with a version comment, least-privilege
+  `permissions`, `persist-credentials: false` on checkout, and no
+  `${{ }}` interpolation inside `run:` blocks.
+- Dependabot weekly for the actions and each language ecosystem.
+
+The `conformance` job is the one that matters: it must fail loudly and
+readably, showing the byte-level diff between implementations rather than just
+a red cross.
+
+### Documentation: one guide per language, plus the shared spec
+
+The spec says what the bytes are. Per-language documentation says what it feels
+like to USE the eDSL, and it is where the portability claim is either obviously
+true or obviously strained.
+
+For each of Python, Go, Rust and OCaml:
+
+- `impl/<lang>/README.md`: install, build, test, and a five-line example.
+- Idiomatic usage: what the eDSL looks like in that language's own style,
+  rather than a transliteration of another language's.
+- The typing table: which invariants are compile-time here and which are not.
+- Generated API docs where the ecosystem expects them (pdoc, godoc, rustdoc,
+  odoc), built in CI so they cannot rot.
+
+A rule worth keeping: if an example needs a paragraph of explanation in one
+language and one line in another, that asymmetry belongs in the docs, because
+it is evidence about the thesis.
+
+### Real-world examples, in the spirit of nixpkgs
+
+Toy derivations prove the format; real ones prove the design. nixpkgs is
+convincing because it packages actual software, and the same standard applies
+here. Each example is written in ALL FOUR languages and must produce identical
+bytes.
+
+Ordered by what they stress:
+
+1. **hello**: the smallest real package. Fetch, configure, make, install.
+2. **A fixed-output fetch**: `fetchurl` with a declared hash. Exercises the
+   network escape hatch and the hash re-encoding rule.
+3. **A dependency chain**: three derivations deep, so `inputDrvs` is exercised
+   with more than one entry, which is where the open sorting question bites.
+4. **A multi-output package**: `out`, `dev`, `lib`, exercising the two
+   different orderings in one file.
+5. **A patched package**: source plus a patch applied, exercising `inputSrcs`
+   with several entries.
+6. **Something with a real dependency graph**: a small C program linking a
+   library built by another derivation.
+
+Each example carries the equivalent Nix expression next to it, so the
+differential test covers it too. An example is not finished until it BUILDS
+through a real Nix store, not merely until it serialises.
 
 ## Phase 3 (conditional): the module system
 

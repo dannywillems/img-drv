@@ -67,11 +67,18 @@ types" to "very strong static types".
   signature needs anything beyond finite products, Go is where it breaks.
   A clean Go embedding is the empirical evidence for the theory in
   [`docs/theory.md`](docs/theory.md); an ugly one is the refutation.
-- **Python** is the readable one, and it probes the other end of the axis:
-  gradual typing, so it shows the minimum surface the signature needs when the
-  type system is not helping at all. It is also the fastest to iterate on while
-  the spec is still moving, and the best language to read the spec back out of,
-  which is why it goes first in Phase 1.
+- **Python** is the readable one, and it probes gradual typing pushed to its
+  limit: fully annotated and `mypy --strict` clean, so it tests whether the
+  signature survives when types are BOLTED ON rather than intrinsic. It is also
+  the fastest to iterate on while the spec is still moving, and the best
+  language to read the spec back out of, which is why it goes first in Phase 1.
+
+Every implementation is as strongly typed as its language permits, enforced in
+CI. That is not a style preference: four implementations only span the typing
+axis if each one is honest about what its type system can actually enforce, and
+the table of "which invariants are unrepresentable here" is one of the real
+outputs of the project. Each targets the LATEST STABLE release of its language,
+pinned. See [`docs/plan.md`](docs/plan.md#engineering-baseline-runs-alongside-every-phase).
 
 ## Layout
 
