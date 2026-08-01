@@ -1,26 +1,17 @@
 # Store path computation
 
-**Status: PARTLY solved. Do not trust this yet.**
+**Status: solved, and verified against real derivations.**
 
-Corrected 2026-08-01. This document previously said "solved and verified" on
-the strength of hand-written examples, which agreed 12 times out of 12. Real
-nixpkgs derivations then disagreed **323 times out of 403**, and the earlier
-claim was simply wrong.
+- **1259 of 1259** output paths reproduced across **805 real nixpkgs
+  derivations** (the closures of git, python3, curl, openssl, cmake, sqlite).
+- **12 of 12** golden examples.
+- **805 of 805** round-trip byte-identically through the parser.
 
-What holds up against real derivations:
-
-- the outer step, base-32 and XOR-folding: **verified**;
-- fixed-output derivations: **80 of 80 in a real closure**;
-- non-fixed derivations with NO inputs: verified on the examples here.
-
-What does not:
-
-- **non-fixed derivations WITH inputs: 0 of 145.** The input-folding rule below
-  is wrong or incomplete, and finding out how is the current top task.
-
-The lesson is recorded rather than buried: hand-made examples only exercise the
-cases you already thought of. See `scripts/fetch-corpus.sh`, which now pulls
-random real packages so CI keeps finding cases a fixed corpus never would.
+The history is kept deliberately. This document first said "solved and
+verified" on the strength of hand-written examples, which agreed 12 times out
+of 12. Real derivations then disagreed **323 times out of 403**. Two distinct
+bugs were hiding behind examples that never exercised them, and both are
+documented below under "The two that hid".
 
 Nothing here came from memory. The manual does not document this, so each rule
 was established by reproducing known outputs and rejecting the variants that
@@ -134,25 +125,40 @@ against `nix-instantiate` exists to catch exactly this.
 | `dep-a` | reconstructed from scratch; its computed paths match what `dependent.drv` refers to |
 | `dependent` | the mask/do-not-mask asymmetry |
 
-## The open problem
+## The two that hid
 
-Non-fixed derivations with inputs do not reproduce. What has been ruled out by
-experiment:
+Both were invisible to hand-written examples, and both are the kind of thing
+that produces a plausible wrong answer rather than an error.
 
-- the parser: 226 of 226 real derivations round-trip byte-identically, so
-  reading and writing the format is not the issue;
-- the outer machinery: fixed-output paths reproduce exactly, so base-32,
-  XOR-folding and the fingerprint layout are right;
-- three input-hash variants (masked, unmasked, raw text) on a real case with
-  only fixed-output inputs, which isolates the masked serialization step and
-  still mismatches.
+### A fixed-output derivation has TWO different hash strings
 
-That last point is the useful one: with all inputs fixed-output, the input
-hashes are unambiguous, so the remaining error is in how the derivation ITSELF
-is serialized for hashing, not in how its inputs are folded in. Suspects, in
-order: whether env entries keyed by an output name are blanked exactly as
-assumed, whether `inputSrcs` participate differently, and whether newer Nix
-computes output paths by a route this model does not capture at all.
+```
+its own path :  sha256("fixed:out:" + algo + ":" + hash + ":")
+as an input  :  sha256("fixed:out:" + algo + ":" + hash + ":" + output path)
+```
+
+The second appends the store path; the first cannot, because that path is what
+is being computed.
+
+Using the first in both places leaves every fetch's own path correct and every
+path DOWNSTREAM of a fetch wrong. That is exactly the pattern the first real
+corpus showed: 80 fixed-output derivations passing, and all 145 that depended
+on them failing. No example written by hand had a dependency on a fetch.
+
+### `r:sha256` uses an entirely different scheme
+
+Recursive (NAR) ingestion with sha256 takes the **`source`** kind and uses the
+declared hash **directly** as the inner hash, with no `fixed:out:` fingerprint
+at all:
+
+```
+r:sha256  ->  store_path("source", declared hash, name)
+otherwise ->  store_path("output:out", sha256("fixed:out:..."), name)
+```
+
+Exactly one derivation in a 226-derivation closure exercised this. A corpus of
+six hand-written examples would never have contained it, and a corpus of six
+hundred real ones contains it by accident.
 
 ## Still open
 

@@ -18,7 +18,7 @@ import hashlib
 import pathlib
 import sys
 
-from aterm import Derivation, parse, unparse
+from aterm import Derivation, Output, parse, unparse
 
 STORE = "/nix/store"
 
@@ -78,17 +78,45 @@ def sha256_hex(s: str) -> str:
 # --- the two hashes -------------------------------------------------------
 
 
-def fixed_output_hash(drv: Derivation) -> str | None:
-    """A fixed-output derivation is identified by its DECLARED hash.
-
-    Its content is known in advance, so two fixed-output derivations fetching
-    the same bytes are interchangeable however differently they are written.
-    That is what lets every fetchurl in nixpkgs share a cache entry.
-    """
+def fixed_output(drv: Derivation) -> Output | None:
     for o in drv.outputs:
         if o.fixed:
-            return sha256_hex(f"fixed:out:{o.hash_algo}:{o.hash}:")
+            return o
     return None
+
+
+def fixed_output_path(o: Output, drv_name: str) -> str:
+    """The store path of a fixed-output derivation.
+
+    TWO schemes, and which one applies depends on the ingestion method that is
+    encoded in the algo field itself:
+
+    - `r:sha256`, i.e. recursive/NAR ingestion with sha256, takes the `source`
+      kind and uses the declared hash DIRECTLY as the inner hash;
+    - everything else builds the usual `fixed:out:...` fingerprint first.
+
+    Missing the first case costs exactly one path in a real closure, which is
+    how it survived a corpus of examples written by hand.
+    """
+    if o.hash_algo == "r:sha256":
+        return store_path("source", o.hash, drv_name)
+    return store_path("output:out", sha256_hex(f"fixed:out:{o.hash_algo}:{o.hash}:"), drv_name)
+
+
+def fixed_output_input_hash(o: Output) -> str:
+    """The hash by which a fixed-output derivation is known AS AN INPUT.
+
+    Note the trailing store path. This is NOT the same string used to compute
+    the path itself, which ends at the colon: including the path here would be
+    circular there.
+
+    Getting these two confused is invisible until something DEPENDS on a
+    fixed-output derivation, because the derivation's own path still comes out
+    right. It accounted for every one of the 145 failures in the first real
+    corpus: the fetches all verified, and everything downstream of them did
+    not.
+    """
+    return sha256_hex(f"fixed:out:{o.hash_algo}:{o.hash}:{o.path}")
 
 
 def input_hash(path: str, corpus: dict[str, Derivation], memo: dict[str, str]) -> str:
@@ -101,16 +129,18 @@ def input_hash(path: str, corpus: dict[str, Derivation], memo: dict[str, str]) -
     if path in memo:
         return memo[path]
     drv = corpus[path]
-    fixed = fixed_output_hash(drv)
-    if fixed is None:
+    o = fixed_output(drv)
+    if o is not None:
+        h = fixed_output_input_hash(o)
+    else:
         inputs = {
             dep: input_hash(dep, corpus, memo)
             for dep, _outs in drv.input_drvs
             if dep in corpus
         }
-        fixed = sha256_hex(unparse(drv, mask_outputs=False, input_hashes=inputs))
-    memo[path] = fixed
-    return fixed
+        h = sha256_hex(unparse(drv, mask_outputs=False, input_hashes=inputs))
+    memo[path] = h
+    return h
 
 
 def output_store_name(drv_name: str, output: str) -> str:
@@ -126,9 +156,9 @@ def output_paths(
     The asymmetry: mask MY outputs, because they are what is being computed;
     do not mask my inputs'.
     """
-    fixed = fixed_output_hash(drv)
-    if fixed is not None:
-        return {"out": store_path("output:out", fixed, drv_name)}
+    o = fixed_output(drv)
+    if o is not None:
+        return {o.name: fixed_output_path(o, drv_name)}
     inner = sha256_hex(unparse(drv, mask_outputs=True, input_hashes=input_hashes))
     return {
         o.name: store_path(
@@ -143,9 +173,23 @@ def drv_path(aterm: str, drv_name: str) -> str:
     return store_path("text", sha256_hex(aterm), f"{drv_name}.drv")
 
 
-def name_of(store_path_str: str) -> str:
-    """`/nix/store/<32 chars>-hello-2.12.3.drv` -> `hello-2.12.3`."""
-    return store_path_str.split("/")[-1].split("-", 1)[1].removesuffix(".drv")
+def name_of(store_path_str: str, drv: Derivation | None = None) -> str:
+    """The derivation's name, which is what output paths are suffixed with.
+
+    A real store path is `<32 chars>-<name>.drv`, so the hash prefix is
+    stripped. The golden examples are named after the case they demonstrate
+    rather than after the derivation, so fall back to the `name` environment
+    variable, which every derivation carries.
+    """
+    base = store_path_str.split("/")[-1].removesuffix(".drv")
+    head, sep, tail = base.partition("-")
+    if sep and len(head) == 32 and not set(head) - set(BASE32_ALPHABET):
+        return tail
+    if drv is not None:
+        for k, v in drv.env:
+            if k == "name":
+                return v
+    return base
 
 
 # --- verification ---------------------------------------------------------
@@ -169,12 +213,12 @@ def verify_corpus(directory: pathlib.Path) -> tuple[int, int]:
             for dep, _outs in drv.input_drvs
             if dep in corpus
         }
-        got = output_paths(drv, name_of(path), inputs)
+        got = output_paths(drv, name_of(path, drv), inputs)
         for o in drv.outputs:
             checked += 1
             if got.get(o.name) != o.path:
                 failures += 1
-                print(f"FAIL {name_of(path)}:{o.name}")
+                print(f"FAIL {name_of(path, drv)}:{o.name}")
                 print(f"  expected {o.path}")
                 print(f"  got      {got.get(o.name)}")
     return checked, failures

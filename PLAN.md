@@ -20,20 +20,14 @@ How it is used:
 
 Ordered. The top item is the next thing to do.
 
-1. **Fix input-folding for non-fixed derivations.** 0 of 145 real ones
-   reproduce. The parser and the outer machinery are both ruled out by
-   experiment, and a case with only fixed-output inputs still fails, which
-   isolates the fault to how the derivation itself is serialized for hashing
-   rather than to its inputs. See `docs/spec/store-paths.md`, "The open
-   problem".
-2. **Pin the oracle.** Choose the Nix version the differential test compares
+1. **Pin the oracle.** Choose the Nix version the differential test compares
    against, and check whether `.drv` output is byte-stable across releases.
    `latest` was used to derive the rules and must not be used to test against.
-3. **Decide the licence** before anyone else contributes. See Open questions.
-4. **Scaffold Python**: `impl/python/`, pinned 3.14.6, `mypy --strict`, and the
+2. **Decide the licence** before anyone else contributes. See Open questions.
+3. **Scaffold Python**: `impl/python/`, pinned 3.14.6, `mypy --strict`, and the
    `ci.yml` skeleton calling Makefile targets. `scripts/store_paths.py` is the
    verified reference to port from, and its self-check is the first test.
-5. **Package each implementation as a REUSABLE LIBRARY**, not a script: PyPI,
+4. **Package each implementation as a REUSABLE LIBRARY**, not a script: PyPI,
    opam, crates.io and a Go module, each semver'd with a documented public
    surface. The point of the project is that other people embed these.
 
@@ -48,10 +42,9 @@ Ordered. The top item is the next thing to do.
       derivations round-trip BYTE-IDENTICALLY (`scripts/aterm.py`).
 - [x] A real-vector harness: pull random nixpkgs packages, export their .drv
       closures, verify against them (`scripts/fetch-corpus.sh`).
-- [~] Store path computation. PARTLY solved: the outer step is right, and
-      fixed-output paths reproduce 80 of 80 in a real closure, but non-fixed
-      derivations with inputs reproduce 0 of 145. The earlier "solved" claim
-      rested on hand-written examples and was wrong.
+- [x] Store path computation. SOLVED and verified against real derivations:
+      1259 of 1259 output paths across 805 real nixpkgs derivations, plus
+      12 of 12 golden examples.
 - [x] CI: GitHub Actions, SHA-pinned, every job through a Makefile target.
 - [ ] Any implementation at all.
 
@@ -337,6 +330,15 @@ This is arguably the most reusable idea in NixOS and nobody has extracted it.
 ---
 
 ## Plan log
+
+- **2026-08-01** Store path computation SOLVED: 1259 of 1259 output paths
+  across 805 real nixpkgs derivations. The two bugs that hand-written examples
+  could never have caught: a fixed-output derivation has two different hash
+  strings, the one identifying it as an INPUT appending the output path, which
+  left every fetch correct and everything downstream of a fetch wrong; and
+  `r:sha256` uses the `source` kind with the declared hash directly rather than
+  a `fixed:out:` fingerprint, exercised by exactly one derivation in a
+  226-derivation closure. Added AGENTS.md so neither is rediscovered.
 
 - **2026-08-01** Real nixpkgs derivations DISPROVED the store-path claim: 12/12
   on hand-written examples, 80/403 on a real closure. Replaced the regex
