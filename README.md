@@ -51,7 +51,7 @@ and in Nix, emit both derivations, and compare byte for byte against
 `nix-instantiate`. If they agree, the IR is provably right. That test is the
 project.
 
-## Why three languages, and why these three
+## Why four languages, and why these four
 
 Portability is the claim under test, so the eDSLs are the experiment, not the
 product. One engine, four front-ends, chosen to span the axis from "no static

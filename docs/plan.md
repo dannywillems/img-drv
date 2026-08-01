@@ -16,7 +16,7 @@ Two ways it fails, and both are informative:
 - **Portability fails.** The signature cannot be expressed cleanly in Go
   without sum types or generics gymnastics. Then the Lawvere-theory argument in
   `theory.md` is wrong in practice, and we say so.
-- **Canonicity fails.** Three implementations disagree byte-for-byte and the
+- **Canonicity fails.** The implementations disagree byte-for-byte and the
   disagreements cannot be closed by tightening the spec. Then content
   addressing across languages is not achievable this way.
 
@@ -68,16 +68,17 @@ If all four agree byte for byte, the portability claim is as well supported as
 this kind of claim can be.
 
 - [ ] Golden-file conformance suite: a set of intents, each with its expected
-      canonical bytes and hash, language-independent.
+      canonical bytes and hash, language-independent. Seeded by
+      `docs/spec/examples/`, which already holds five cases from real Nix.
 - [ ] Rust eDSL passing it.
 - [ ] Go eDSL passing it.
 
-Go is the **falsification test**, not a third port. It has no sum types, no
+Go is the **falsification test**, not a fourth port. It has no sum types, no
 higher-kinded types, minimal generics. If the signature needs more than finite
 products, this is where it shows. Record honestly how ugly it gets; that
 ugliness is the experimental result.
 
-Exit test: all three emit identical bytes for every case in the suite.
+Exit test: all four emit identical bytes for every case in the suite.
 
 ## Phase 3 (conditional): the module system
 
