@@ -18,9 +18,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        with:
-          python-version-file: .python-version
+      # No setup-python: every target runs in a pinned container, so the
+      # runner's own interpreter is never used and cannot drift.
       # Recomputes every store path in docs/spec/examples/ from the derivation
       # text alone. If the spec and the reference disagree, this fails.
       - run: make spec-check
@@ -32,10 +31,32 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
-        with:
-          python-version-file: .python-version
-      # The golden files came from a pinned Nix. This regenerates them and
-      # fails if upstream Nix has changed what it emits, which is the only
-      # way we find out that the oracle moved under us.
+      # Instantiates a probe with the pinned Nix and recomputes every store
+      # path in the resulting closure. Fails if we broke something OR if
+      # upstream Nix changed how paths are derived, which is the only way we
+      # find out that the oracle moved under us.
       - run: make differential
+
+  python:
+    name: python lint, types and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # ruff, mypy --strict and pytest, all in the pinned image.
+      - run: make python-lint
+      - run: make python-test
+      - run: make python-build
+
+  corpus:
+    name: random real nixpkgs derivations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # A FRESH RANDOM SAMPLE every run. The point is to keep finding cases a
+      # fixed corpus never would: hand-written examples agreed 12 times out of
+      # 12 while real ones disagreed 323 times out of 403.
+      - run: make corpus N=10

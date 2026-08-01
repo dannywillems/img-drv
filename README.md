@@ -98,7 +98,14 @@ either validate the thesis or kill it; nothing beyond that is committed to.
 
 ## Licence
 
-GPL-3.0. See the note in [`PLAN.md`](PLAN.md#open-questions): a
-copyleft licence on a library intended for embedding in other people's stacks
-is in tension with the goal of easy adoption, and that tension should be
-resolved deliberately rather than by default.
+**MPL-2.0** for the code, **CC0-1.0** for `docs/spec/`.
+
+MPL-2.0 is file-level copyleft: embedding these libraries in a larger work,
+under any licence, is explicitly permitted, while changes to img-drv's own
+files stay open. That fits a library whose whole purpose is to be embedded,
+and it avoids the static-linking question LGPL creates for Go, Rust and OCaml.
+The specification is CC0 because independent implementations of it are the
+point of the project.
+
+Reasoning, costs accepted, and the conditions to revisit:
+[`docs/decisions/2026-08-01-licence-mpl-2.0.md`](docs/decisions/2026-08-01-licence-mpl-2.0.md).

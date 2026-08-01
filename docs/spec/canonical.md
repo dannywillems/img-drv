@@ -118,20 +118,27 @@ they round-trip.
 
 ## 3. What is NOT yet specified
 
-**Store path computation is unresolved, and it blocks Phase 1.** Every `path`
-in the outputs list, and the path of the `.drv` itself, is a hash. Reproducing
-those requires the exact fingerprint construction (the `output:out:sha256:...`
-scheme and the base-32 encoding Nix uses), which has not been verified here.
+Store path computation, which used to be the blocker here, is solved and
+verified: see [`store-paths.md`](store-paths.md). What remains open:
 
-Until that is settled, an implementation can emit a derivation whose SHAPE is
-right and whose PATHS are wrong, which is worse than useless because it looks
-correct. Phase 1's differential test against `nix-instantiate` is what catches
-that, and it cannot pass until this is done.
+- the sort order of `inputDrvs` and `inputSrcs` when there is more than one
+  entry, which has not been pinned down independently of observation;
+- NAR serialization, needed for `inputSrcs` computed from local files rather
+  than referenced by path;
+- whether non-UTF-8 byte sequences are permitted in values, and round-trip.
+
+The failure this section exists to prevent has not changed: an implementation
+can emit a derivation whose SHAPE is right and whose PATHS are wrong, which is
+worse than useless because it looks correct. `make differential` is what
+catches it.
 
 ## 4. Reproducing the probes
 
+The probe is checked in as [`../../scripts/probe.nix`](../../scripts/probe.nix)
+and run by `make differential` against the pinned oracle. Ad hoc:
+
 ```sh
-docker run --rm nixos/nix:latest sh -c '
+docker run --rm nixos/nix:2.35.1 sh -c '
   cat > /tmp/x.nix <<EOF
 derivation { name = "hello"; system = "x86_64-linux";
              builder = "/bin/sh"; args = [ "-c" "echo hi > \$out" ]; }
@@ -139,8 +146,14 @@ EOF
   cat $(nix-instantiate /tmp/x.nix)'
 ```
 
-Pin the Nix version when this becomes a conformance oracle. `latest` was used
-to derive the rules; it must not be used to test against.
+The oracle IS pinned, by digest, in
+[`../../scripts/pins.env`](../../scripts/pins.env). `latest` was used to derive
+the rules and must never be used to test against: a tag is a mutable pointer,
+and a moving oracle cannot distinguish "we broke it" from "upstream changed".
+
+Measured rather than assumed: Nix 2.34.8 and 2.35.1 emit byte-identical
+derivations for a probe exercising multiple outputs, a dependency edge and
+unsorted env keys. So the format is stable across at least one minor release.
 
 ## 5. Consequences for implementations
 

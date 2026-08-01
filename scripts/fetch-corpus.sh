@@ -15,7 +15,12 @@ set -euo pipefail
 COUNT="${1:-10}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
-OUT="${CORPUS_DIR:-$REPO/build/corpus}"
+REL="${CORPUS_DIR:-build/corpus}"
+OUT="$REPO/$REL"
+
+# The oracle is pinned by digest in one place; see scripts/oracle.env.
+# shellcheck source=scripts/pins.env
+. "$HERE/pins.env"
 
 mkdir -p "$OUT"
 rm -f "$OUT"/*.drv 2>/dev/null || true
@@ -24,7 +29,7 @@ echo ">> pulling $COUNT random nixpkgs packages"
 
 # Everything runs in the pinned Nix image: nothing is installed on the host,
 # and the same command works on a laptop and on a CI runner.
-docker run --rm -v "$OUT:/out" -e COUNT="$COUNT" nixos/nix:latest sh -c '
+docker run --rm -v "$OUT:/out" -e COUNT="$COUNT" "$NIX_IMAGE" sh -c '
 set -eu
 nix-channel --add https://nixos.org/channels/nixpkgs-unstable nixpkgs >/dev/null 2>&1
 nix-channel --update >/dev/null 2>&1
@@ -53,8 +58,10 @@ done
 n=$(find "$OUT" -name '*.drv' | wc -l | tr -d ' ')
 echo ">> corpus: $n derivations in $OUT"
 
+# Both checks run through the library, so the corpus gate and the unit tests
+# exercise exactly the same code.
 echo ">> round-trip check (parse then serialize must be byte-identical)"
-python3 "$HERE/aterm.py" "$OUT"
+PYTHONPATH="$PY_IMPL/src" "$HERE/py.sh" roundtrip "$REL"
 
 echo ">> store path check"
-python3 "$HERE/store_paths.py" "$OUT"
+PYTHONPATH="$PY_IMPL/src" "$HERE/py.sh" verify "$REL"

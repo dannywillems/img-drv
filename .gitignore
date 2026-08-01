@@ -28,3 +28,9 @@ build/
 *.log
 *.tmp
 *.bak
+*.egg-info/
+__pycache__/
+.hypothesis/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

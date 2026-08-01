@@ -20,16 +20,19 @@ How it is used:
 
 Ordered. The top item is the next thing to do.
 
-1. **Pin the oracle.** Choose the Nix version the differential test compares
-   against, and check whether `.drv` output is byte-stable across releases.
-   `latest` was used to derive the rules and must not be used to test against.
-2. **Decide the licence** before anyone else contributes. See Open questions.
-3. **Scaffold Python**: `impl/python/`, pinned 3.14.6, `mypy --strict`, and the
-   `ci.yml` skeleton calling Makefile targets. `scripts/store_paths.py` is the
-   verified reference to port from, and its self-check is the first test.
-4. **Package each implementation as a REUSABLE LIBRARY**, not a script: PyPI,
-   opam, crates.io and a Go module, each semver'd with a documented public
-   surface. The point of the project is that other people embed these.
+1. **Build the Python eDSL surface** on top of the library that now exists:
+   the first-order signature from `docs/spec/signature.md` as a typed builder
+   API, so a build can be DESCRIBED rather than only parsed. This is the first
+   half of the thesis test; until it exists there is nothing to compare across
+   languages.
+2. **Port to Rust**, as a reusable crate mirroring the Python public surface.
+   Second language means the conformance target stops being vacuous.
+3. **Make `make conformance` real**: assert Python and Rust emit byte-identical
+   IR for the same intent. This is the experiment the whole project is a bet
+   on, and it can now fail honestly.
+4. **Then Go and OCaml**, in that order, each a reusable library.
+5. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
+   format (`docs/spec/canonical.md` section 3).
 
 ## State
 
@@ -38,15 +41,26 @@ Ordered. The top item is the next thing to do.
 - [x] Signature drafted (`docs/spec/signature.md`).
 - [x] Serialization derived EMPIRICALLY from real Nix, with golden files
       (`docs/spec/canonical.md`, `docs/spec/examples/`).
-- [x] An ATerm parser: recursive descent, no regexes. 226 of 226 real nixpkgs
-      derivations round-trip BYTE-IDENTICALLY (`scripts/aterm.py`).
+- [x] An ATerm parser: recursive descent, no regexes. 805 of 805 real nixpkgs
+      derivations round-trip BYTE-IDENTICALLY.
 - [x] A real-vector harness: pull random nixpkgs packages, export their .drv
       closures, verify against them (`scripts/fetch-corpus.sh`).
 - [x] Store path computation. SOLVED and verified against real derivations:
       1259 of 1259 output paths across 805 real nixpkgs derivations, plus
       12 of 12 golden examples.
 - [x] CI: GitHub Actions, SHA-pinned, every job through a Makefile target.
-- [ ] Any implementation at all.
+- [x] Oracle pinned by DIGEST (`scripts/pins.env`), with byte-stability
+      measured across two Nix releases rather than assumed.
+- [x] `make differential` implemented: instantiate a probe with the pinned Nix,
+      recompute every store path in the closure, compare. 7 of 7.
+- [x] Licence decided: MPL-2.0 for code, CC0 for the spec
+      (`docs/decisions/2026-08-01-licence-mpl-2.0.md`).
+- [x] **Python library** (`impl/python/`): the verified reference, as a typed,
+      packaged, semver'd library. `mypy --strict` clean, 32 tests including
+      property-based ones, wheel and sdist build.
+- [ ] An eDSL surface in any language: nothing yet DESCRIBES a build, it can
+      only read and hash one.
+- [ ] A second implementation, without which `make conformance` is vacuous.
 
 ---
 
@@ -330,6 +344,26 @@ This is arguably the most reusable idea in NixOS and nobody has extracted it.
 ---
 
 ## Plan log
+
+- **2026-08-01** Oracle pinned to `nixos/nix:2.35.1` BY DIGEST. Byte-stability
+  measured, not assumed: 2.34.8 and 2.35.1 emit byte-identical derivations for
+  a probe exercising multiple outputs, a dependency edge and unsorted env keys.
+  `make differential` now instantiates `scripts/probe.nix` with that pinned Nix
+  and recomputes every store path in the closure: 7 of 7, including the
+  `r:sha256` case that only one derivation in 226 exercised. The target used to
+  `exit 1`, so the CI job had never passed.
+- **2026-08-01** Licence decided: MPL-2.0 for code, CC0-1.0 for `docs/spec/`.
+  GPL-3.0 was self-defeating for a library whose purpose is embedding, and LGPL
+  fits badly because three of the four target languages link statically, making
+  its relinking clause burdensome and arguable. File-level copyleft keeps
+  changes to the IR open without any linking analysis.
+- **2026-08-01** Python library landed at `impl/python/`, replacing the two
+  scripts. Same verified logic, now typed (`NewType` for store paths, digests
+  and output names, since confusing two 64-character strings is a bug this
+  project has already paid for), `mypy --strict` clean, and packaged. The
+  serialization laws are property-tested with Hypothesis: `parse . unparse =
+  id` universally, `unparse . parse = id` on canonical text only, which is what
+  a canonical form MEANS.
 
 - **2026-08-01** Store path computation SOLVED: 1259 of 1259 output paths
   across 805 real nixpkgs derivations. The two bugs that hand-written examples

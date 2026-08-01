@@ -1,0 +1,92 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "img-drv"
+version = "0.1.0"
+description = "A portable, content-addressed IR for reproducible build descriptions"
+readme = "README.md"
+license = "MPL-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Danny Willems", email = "danny@badaas.be" }]
+keywords = ["reproducible-builds", "nix", "derivation", "build-system"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Software Development :: Build Tools",
+  "Typing :: Typed",
+]
+# The floor is what the library supports; .python-version pins what CI and a
+# developer actually run. A library that only builds on the newest release is
+# not reusable, which is the point of shipping this as a library at all.
+requires-python = ">=3.11"
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/dannywillems/img-drv"
+Repository = "https://github.com/dannywillems/img-drv"
+Issues = "https://github.com/dannywillems/img-drv/issues"
+
+[project.scripts]
+img-drv = "img_drv.cli:main"
+
+[dependency-groups]
+dev = ["pytest", "pytest-cov", "hypothesis", "mypy", "ruff"]
+
+# Explicit include lists, never excludes: a new top-level file must be added
+# deliberately rather than shipped by accident.
+[tool.hatch.build.targets.sdist]
+include = ["src/img_drv/", "tests/", "LICENSE", "README.md", "pyproject.toml"]
+
+[tool.hatch.build.targets.wheel]
+include = ["src/img_drv/"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/img_drv" = "img_drv"
+
+[tool.ruff]
+line-length = 80
+# Matches requires-python, not the newest release, so lints never assume
+# syntax the supported floor does not have.
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E", "F", "I", "N", "W", "UP", "B", "C4", "SIM",
+  "S", "ASYNC", "PT", "PTH",
+  "PIE", "RET", "ARG", "ERA", "RUF",
+  "PLC", "PLE", "PLW",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "ARG001", "ARG002", "PLW"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+warn_unused_ignores = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.coverage.run]
+source = ["img_drv"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_also = [
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+]

@@ -66,11 +66,17 @@ implementation works.
 The point of four implementations is to span the typing axis. That only means
 something if each is as typed as its language allows.
 
-### 5. Latest stable toolchains, pinned
+### 5. Latest stable toolchains, pinned, and running in containers
 
-Python 3.14.6, Go 1.26.5, Rust 1.97.1, OCaml 5.5.0, each pinned in its
-conventional file. A version moves in its own commit with a readable diff. A
-project about reproducibility cannot have a fuzzy toolchain.
+Python 3.14.6, Go 1.26.5, Rust 1.97.1, OCaml 5.5.0. Tool IMAGES are pinned by
+DIGEST in [`scripts/pins.env`](scripts/pins.env), including the Nix oracle,
+because a tag is a mutable pointer and a moving oracle cannot distinguish "we
+broke it" from "upstream changed". A version moves in its own commit with a
+readable diff.
+
+Nothing is installed on the host. Every target runs in a pinned container, so
+a laptop and a CI runner execute the same bytes, and `actions/setup-python`
+does not appear in any workflow.
 
 ### 6. Every check is a Makefile target
 
@@ -81,7 +87,13 @@ call it. A local run and a CI run must be the same run.
 
 Not a script. PyPI, opam, crates.io and a Go module, each semver'd with a
 documented public surface. Other people embedding these is the point of the
-project.
+project, and it is why the licence is MPL-2.0 rather than GPL: see
+[`docs/decisions/2026-08-01-licence-mpl-2.0.md`](docs/decisions/2026-08-01-licence-mpl-2.0.md).
+
+The bytes are the artifact. A change to what a serializer emits changes the
+identity of every build that uses it, so it is a MAJOR version bump, never an
+implementation detail. `docs/spec/` is CC0 so that independent implementations
+need no permission.
 
 ### 8. Write down what you learned, where it will be found again
 
@@ -118,10 +130,14 @@ Do not rediscover these.
 
 ```sh
 make spec-check      # recompute every golden store path from text alone
+make differential    # instantiate a probe with the PINNED Nix, compare paths
 make corpus N=10     # pull N random nixpkgs packages and verify against them
+make python-lint     # ruff + mypy --strict
+make python-test     # pytest, including the property-based laws
+make python-build    # wheel + sdist, twine-checked
 make lint-shell
 ```
 
-`make corpus` needs Docker. Nothing in this repository requires Nix to be
-installed on the host: the pinned `nixos/nix` image is used instead, so the
-same command works on a laptop and on a CI runner.
+**Docker is the only prerequisite.** Not Nix, not Python, not shellcheck: each
+target runs in a pinned image. `make differential` is the sharpest gate, since
+it compares against real Nix rather than against ourselves.
