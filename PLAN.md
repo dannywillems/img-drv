@@ -20,15 +20,22 @@ How it is used:
 
 Ordered. The top item is the next thing to do.
 
-1. **Pin the oracle.** Choose the Nix version the differential test compares
+1. **Fix input-folding for non-fixed derivations.** 0 of 145 real ones
+   reproduce. The parser and the outer machinery are both ruled out by
+   experiment, and a case with only fixed-output inputs still fails, which
+   isolates the fault to how the derivation itself is serialized for hashing
+   rather than to its inputs. See `docs/spec/store-paths.md`, "The open
+   problem".
+2. **Pin the oracle.** Choose the Nix version the differential test compares
    against, and check whether `.drv` output is byte-stable across releases.
    `latest` was used to derive the rules and must not be used to test against.
-2. **Decide the licence** before anyone else contributes. See Open questions.
-3. **Scaffold Python**: `impl/python/`, pinned 3.14.6, `mypy --strict`, and the
+3. **Decide the licence** before anyone else contributes. See Open questions.
+4. **Scaffold Python**: `impl/python/`, pinned 3.14.6, `mypy --strict`, and the
    `ci.yml` skeleton calling Makefile targets. `scripts/store_paths.py` is the
    verified reference to port from, and its self-check is the first test.
-4. **Multi-entry `inputDrvs` sorting**, the one spec question the golden files
-   do not answer, because every example has at most one input.
+5. **Package each implementation as a REUSABLE LIBRARY**, not a script: PyPI,
+   opam, crates.io and a Go module, each semver'd with a documented public
+   surface. The point of the project is that other people embed these.
 
 ## State
 
@@ -37,9 +44,15 @@ Ordered. The top item is the next thing to do.
 - [x] Signature drafted (`docs/spec/signature.md`).
 - [x] Serialization derived EMPIRICALLY from real Nix, with golden files
       (`docs/spec/canonical.md`, `docs/spec/examples/`).
-- [x] Store path computation. Solved and verified, 8/8 golden paths
-      reproduced, including one derivation reconstructed from scratch
-      (`docs/spec/store-paths.md`, `scripts/store_paths.py`).
+- [x] An ATerm parser: recursive descent, no regexes. 226 of 226 real nixpkgs
+      derivations round-trip BYTE-IDENTICALLY (`scripts/aterm.py`).
+- [x] A real-vector harness: pull random nixpkgs packages, export their .drv
+      closures, verify against them (`scripts/fetch-corpus.sh`).
+- [~] Store path computation. PARTLY solved: the outer step is right, and
+      fixed-output paths reproduce 80 of 80 in a real closure, but non-fixed
+      derivations with inputs reproduce 0 of 145. The earlier "solved" claim
+      rested on hand-written examples and was wrong.
+- [x] CI: GitHub Actions, SHA-pinned, every job through a Makefile target.
 - [ ] Any implementation at all.
 
 ---
@@ -324,6 +337,15 @@ This is arguably the most reusable idea in NixOS and nobody has extracted it.
 ---
 
 ## Plan log
+
+- **2026-08-01** Real nixpkgs derivations DISPROVED the store-path claim: 12/12
+  on hand-written examples, 80/403 on a real closure. Replaced the regex
+  pseudo-parser with a real recursive-descent one, which now round-trips 226 of
+  226 real derivations byte-identically, and added a harness that pulls RANDOM
+  packages so CI keeps finding cases a fixed corpus never would. Also settled
+  multi-entry inputDrvs ordering: the .drv sorts by store PATH, the hashed form
+  re-sorts by input HASH, and a textual substitution silently gets this wrong
+  on anything with more than one input.
 
 - **2026-08-01** Store path computation SOLVED and verified: 8/8 golden paths
   reproduced from derivation text alone, including a derivation reconstructed

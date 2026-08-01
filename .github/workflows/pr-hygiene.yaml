@@ -1,0 +1,34 @@
+name: pr hygiene
+
+on:
+  pull_request:
+    types: [assigned, opened, synchronize, reopened, labeled, unlabeled]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download the checks
+        run: |
+          base=https://raw.githubusercontent.com/dannywillems/toolbox/main/pr-hygiene
+          for s in check-pr-size.sh check-title-length.sh check-no-fixup.sh \
+                   check-commit-body.sh; do
+            curl -sSLO "$base/$s"
+            chmod +x "$s"
+          done
+      # BASE_SHA goes through the environment, never interpolated into the
+      # script, so a branch name cannot inject shell.
+      - run: ./check-pr-size.sh "$BASE_SHA"
+      - run: ./check-title-length.sh "$BASE_SHA"
+      - run: ./check-no-fixup.sh "$BASE_SHA"
+      - run: ./check-commit-body.sh "$BASE_SHA"

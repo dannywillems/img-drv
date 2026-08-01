@@ -1,10 +1,26 @@
 # Store path computation
 
-**Status: solved and verified.** Every rule below reproduces real Nix output
-byte for byte. The executable reference is
-[`scripts/store_paths.py`](../../scripts/store_paths.py), which recomputes every
-path in [`examples/`](examples/) from the derivation text alone and fails if any
-disagrees. It currently passes 8 of 8.
+**Status: PARTLY solved. Do not trust this yet.**
+
+Corrected 2026-08-01. This document previously said "solved and verified" on
+the strength of hand-written examples, which agreed 12 times out of 12. Real
+nixpkgs derivations then disagreed **323 times out of 403**, and the earlier
+claim was simply wrong.
+
+What holds up against real derivations:
+
+- the outer step, base-32 and XOR-folding: **verified**;
+- fixed-output derivations: **80 of 80 in a real closure**;
+- non-fixed derivations with NO inputs: verified on the examples here.
+
+What does not:
+
+- **non-fixed derivations WITH inputs: 0 of 145.** The input-folding rule below
+  is wrong or incomplete, and finding out how is the current top task.
+
+The lesson is recorded rather than buried: hand-made examples only exercise the
+cases you already thought of. See `scripts/fetch-corpus.sh`, which now pulls
+random real packages so CI keeps finding cases a fixed corpus never would.
 
 Nothing here came from memory. The manual does not document this, so each rule
 was established by reproducing known outputs and rejecting the variants that
@@ -117,6 +133,26 @@ against `nix-instantiate` exists to catch exactly this.
 | `fixed` | the fixed-output scheme |
 | `dep-a` | reconstructed from scratch; its computed paths match what `dependent.drv` refers to |
 | `dependent` | the mask/do-not-mask asymmetry |
+
+## The open problem
+
+Non-fixed derivations with inputs do not reproduce. What has been ruled out by
+experiment:
+
+- the parser: 226 of 226 real derivations round-trip byte-identically, so
+  reading and writing the format is not the issue;
+- the outer machinery: fixed-output paths reproduce exactly, so base-32,
+  XOR-folding and the fingerprint layout are right;
+- three input-hash variants (masked, unmasked, raw text) on a real case with
+  only fixed-output inputs, which isolates the masked serialization step and
+  still mismatches.
+
+That last point is the useful one: with all inputs fixed-output, the input
+hashes are unambiguous, so the remaining error is in how the derivation ITSELF
+is serialized for hashing, not in how its inputs are folded in. Suspects, in
+order: whether env entries keyed by an output name are blanked exactly as
+assumed, whether `inputSrcs` participate differently, and whether newer Nix
+computes output paths by a route this model does not capture at all.
 
 ## Still open
 

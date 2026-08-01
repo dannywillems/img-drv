@@ -39,3 +39,19 @@ lint: ## Run linters
 .PHONY: clean
 clean: ## Remove build artifacts
 	rm -rf target _build
+
+.PHONY: spec-check
+spec-check: ## Recompute every golden store path from derivation text alone
+	python3 scripts/store_paths.py
+
+.PHONY: aterm-roundtrip
+aterm-roundtrip: ## Parse then re-serialize every corpus .drv; must be identical
+	python3 scripts/aterm.py $(CORPUS)
+
+.PHONY: corpus
+corpus: ## Pull N random nixpkgs packages and verify against them (needs docker)
+	./scripts/fetch-corpus.sh $(N)
+
+.PHONY: lint-shell
+lint-shell: ## Lint shell scripts
+	shellcheck scripts/*.sh

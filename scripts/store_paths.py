@@ -7,15 +7,18 @@ this file or in the spec, and the script exits non-zero.
 
 This is the reference for the rules written up in docs/spec/store-paths.md.
 Nothing here was taken from memory: each rule was established by generating
-derivations with real Nix (2.35.1) and reproducing the bytes.
+derivations with real Nix (2.35.1) and reproducing the bytes, then checked
+against real nixpkgs derivations, which is what caught the errors the
+hand-written examples could not.
 """
 
 from __future__ import annotations
 
 import hashlib
 import pathlib
-import re
 import sys
+
+from aterm import Derivation, parse, unparse
 
 STORE = "/nix/store"
 
@@ -72,29 +75,42 @@ def sha256_hex(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()
 
 
-# --- parsing just enough ATerm to test with -------------------------------
-#
-# A real implementation builds the ATerm rather than parsing it. These helpers
-# exist so the golden files can be checked without a full parser.
-
-OUTPUT_RE = re.compile(r'\("([^"]+)","(/nix/store/[^"]*)","([^"]*)","([^"]*)"\)')
-INPUTDRV_RE = re.compile(r'\("(/nix/store/[^"]*\.drv)",\[([^\]]*)\]\)')
+# --- the two hashes -------------------------------------------------------
 
 
-def outputs_of(aterm: str) -> list[tuple[str, str, str, str]]:
-    head = aterm.split("],[", 1)[0]
-    return OUTPUT_RE.findall(head)
+def fixed_output_hash(drv: Derivation) -> str | None:
+    """A fixed-output derivation is identified by its DECLARED hash.
 
-
-def mask_outputs(aterm: str) -> str:
-    """Blank every output path, in the outputs list AND in env.
-
-    Both places carry the same string, so replacing the string covers both.
+    Its content is known in advance, so two fixed-output derivations fetching
+    the same bytes are interchangeable however differently they are written.
+    That is what lets every fetchurl in nixpkgs share a cache entry.
     """
-    masked = aterm
-    for _name, path, _algo, _hash in outputs_of(aterm):
-        masked = masked.replace(f'"{path}"', '""')
-    return masked
+    for o in drv.outputs:
+        if o.fixed:
+            return sha256_hex(f"fixed:out:{o.hash_algo}:{o.hash}:")
+    return None
+
+
+def input_hash(path: str, corpus: dict[str, Derivation], memo: dict[str, str]) -> str:
+    """The hash by which a derivation is known when it is someone's INPUT.
+
+    Outputs are NOT masked here. Recursive, because substituting a
+    derivation's inputs needs their own input-hashes first, and memoized
+    because a real closure is a DAG with heavy sharing.
+    """
+    if path in memo:
+        return memo[path]
+    drv = corpus[path]
+    fixed = fixed_output_hash(drv)
+    if fixed is None:
+        inputs = {
+            dep: input_hash(dep, corpus, memo)
+            for dep, _outs in drv.input_drvs
+            if dep in corpus
+        }
+        fixed = sha256_hex(unparse(drv, mask_outputs=False, input_hashes=inputs))
+    memo[path] = fixed
+    return fixed
 
 
 def output_store_name(drv_name: str, output: str) -> str:
@@ -102,65 +118,23 @@ def output_store_name(drv_name: str, output: str) -> str:
     return drv_name if output == "out" else f"{drv_name}-{output}"
 
 
-# --- the two hashes -------------------------------------------------------
+def output_paths(
+    drv: Derivation, drv_name: str, input_hashes: dict[str, str]
+) -> dict[str, str]:
+    """Every output path of a derivation.
 
-
-def drv_hash_for_inputs(aterm: str, resolved: dict[str, str]) -> str:
-    """hashDerivationModulo with outputs NOT masked.
-
-    This is the value that identifies a derivation when it appears as an INPUT
-    of another one. For a derivation with no inputs it is simply the sha256 of
-    the .drv text.
+    The asymmetry: mask MY outputs, because they are what is being computed;
+    do not mask my inputs'.
     """
-    fixed = fixed_output_hash(aterm)
+    fixed = fixed_output_hash(drv)
     if fixed is not None:
-        return fixed
-    return sha256_hex(substitute_inputs(aterm, resolved))
-
-
-def drv_hash_for_self(aterm: str, resolved: dict[str, str]) -> str:
-    """hashDerivationModulo with outputs MASKED.
-
-    This is the value used to compute the derivation's OWN output paths. It has
-    to mask them, because they are what is being computed.
-    """
-    return sha256_hex(substitute_inputs(mask_outputs(aterm), resolved))
-
-
-def fixed_output_hash(aterm: str) -> str | None:
-    """Fixed-output derivations identify themselves by their declared hash.
-
-    Their content is known in advance, so two fixed-output derivations that
-    fetch the same bytes are interchangeable no matter how they are written.
-    """
-    for name, _path, algo, h in outputs_of(aterm):
-        if algo:
-            return sha256_hex(f"fixed:out:{algo}:{h}:")
-    return None
-
-
-def substitute_inputs(aterm: str, resolved: dict[str, str]) -> str:
-    """Replace each inputDrv PATH with that derivation's own hash."""
-    out = aterm
-    for drv_path, _outs in INPUTDRV_RE.findall(aterm):
-        if drv_path in resolved:
-            out = out.replace(drv_path, resolved[drv_path])
-    return out
-
-
-def output_paths(aterm: str, drv_name: str, resolved: dict[str, str]) -> dict[str, str]:
-    """Compute every output path of a derivation."""
-    fixed = fixed_output_hash(aterm)
-    if fixed is not None:
-        # A fixed-output path depends only on the declared hash, never on how
-        # the derivation is written.
-        _n, _p, algo, h = next(o for o in outputs_of(aterm) if o[2])
-        inner = sha256_hex(f"fixed:out:{algo}:{h}:")
-        return {"out": store_path("output:out", inner, drv_name)}
-    inner = drv_hash_for_self(aterm, resolved)
+        return {"out": store_path("output:out", fixed, drv_name)}
+    inner = sha256_hex(unparse(drv, mask_outputs=True, input_hashes=input_hashes))
     return {
-        name: store_path(f"output:{name}", inner, output_store_name(drv_name, name))
-        for name, _p, _a, _h in outputs_of(aterm)
+        o.name: store_path(
+            f"output:{o.name}", inner, output_store_name(drv_name, o.name)
+        )
+        for o in drv.outputs
     }
 
 
@@ -169,57 +143,56 @@ def drv_path(aterm: str, drv_name: str) -> str:
     return store_path("text", sha256_hex(aterm), f"{drv_name}.drv")
 
 
-# --- self-check against the golden files ----------------------------------
+def name_of(store_path_str: str) -> str:
+    """`/nix/store/<32 chars>-hello-2.12.3.drv` -> `hello-2.12.3`."""
+    return store_path_str.split("/")[-1].split("-", 1)[1].removesuffix(".drv")
+
+
+# --- verification ---------------------------------------------------------
+
+
+def verify_corpus(directory: pathlib.Path) -> tuple[int, int]:
+    """Recompute every output path of every derivation in a directory.
+
+    These are real derivations exported from a Nix store, so this is a
+    regression test against vectors nobody wrote by hand.
+    """
+    corpus = {
+        f"{STORE}/{f.name}": parse(f.read_text())
+        for f in directory.glob("*.drv")
+    }
+    memo: dict[str, str] = {}
+    checked = failures = 0
+    for path, drv in sorted(corpus.items()):
+        inputs = {
+            dep: input_hash(dep, corpus, memo)
+            for dep, _outs in drv.input_drvs
+            if dep in corpus
+        }
+        got = output_paths(drv, name_of(path), inputs)
+        for o in drv.outputs:
+            checked += 1
+            if got.get(o.name) != o.path:
+                failures += 1
+                print(f"FAIL {name_of(path)}:{o.name}")
+                print(f"  expected {o.path}")
+                print(f"  got      {got.get(o.name)}")
+    return checked, failures
 
 
 def main() -> int:
-    here = pathlib.Path(__file__).resolve().parent.parent
-    examples = here / "docs" / "spec" / "examples"
-    failures = 0
-    checked = 0
+    if len(sys.argv) > 1:
+        directory = pathlib.Path(sys.argv[1])
+        checked, failures = verify_corpus(directory)
+        n = len(list(directory.glob("*.drv")))
+        print(f"{checked - failures}/{checked} output paths reproduced "
+              f"from {n} real derivations")
+        return 1 if failures else 0
 
-    # dep-a is not committed as a golden file; it is RECONSTRUCTED from its
-    # definition, which is a stronger test: if the algorithm is right, the
-    # reconstruction lands on the path dependent.drv already refers to.
-    dep_a_tmpl = (
-        'Derive([("out","{p}","","")],[],[],"x86_64-linux","/bin/sh",'
-        '["-c","echo a > $out"],[("builder","/bin/sh"),("name","dep-a"),'
-        '("out","{p}"),("system","x86_64-linux")])'
-    )
-    dep_a_inner = sha256_hex(dep_a_tmpl.format(p=""))
-    dep_a_out = store_path("output:out", dep_a_inner, "dep-a")
-    dep_a_aterm = dep_a_tmpl.format(p=dep_a_out)
-    dep_a_drv = drv_path(dep_a_aterm, "dep-a")
-    resolved = {dep_a_drv: sha256_hex(dep_a_aterm)}
-
-    for path in sorted(examples.glob("*.drv")):
-        name = path.stem
-        aterm = path.read_text().rstrip("\n")
-        expected = {n: p for n, p, _a, _h in outputs_of(aterm)}
-        drv_name = "hello" if name == "minimal" else name
-        got = output_paths(aterm, drv_name, resolved)
-        for out_name, want in expected.items():
-            checked += 1
-            if got.get(out_name) != want:
-                failures += 1
-                print(f"FAIL {name}:{out_name}")
-                print(f"  expected {want}")
-                print(f"  got      {got.get(out_name)}")
-            else:
-                print(f"ok   {name}:{out_name}")
-
-    # the reconstruction test
-    checked += 1
-    dependent = (examples / "dependent.drv").read_text()
-    if dep_a_drv in dependent and dep_a_out in dependent:
-        print("ok   dep-a reconstructed from scratch (drv path and out path)")
-    else:
-        failures += 1
-        print("FAIL dep-a reconstruction")
-        print(f"  computed drv {dep_a_drv}")
-        print(f"  computed out {dep_a_out}")
-
-    print(f"\n{checked - failures}/{checked} checks passed")
+    examples = pathlib.Path(__file__).resolve().parent.parent / "docs/spec/examples"
+    checked, failures = verify_corpus(examples)
+    print(f"{checked - failures}/{checked} output paths reproduced "
+          f"from the golden examples")
     return 1 if failures else 0
 
 
