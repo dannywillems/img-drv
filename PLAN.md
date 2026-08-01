@@ -1,4 +1,49 @@
-# Plan
+# PLAN
+
+**This file is the living plan, and the single source of tasks.** It is updated
+every time a decision is made or a piece of work lands, and any task worth doing
+should be derivable from it without asking anyone.
+
+How it is used:
+
+- **Now** is the ordered list of what to do next. Work is taken from the top.
+- Checkboxes move to `[x]` only when the exit test passes, not when the code is
+  written.
+- When something is learned that changes the plan, change the plan in the same
+  commit, and add a line to **Plan log** at the bottom.
+- Reasoning that would otherwise be re-litigated goes to `docs/decisions/`, not
+  here. This file says WHAT and WHEN; the decisions say WHY.
+
+---
+
+## Now
+
+Ordered. The top item is the next thing to do.
+
+1. **Work out store path computation empirically.** BLOCKING Phase 1, and the
+   only thing standing between the spec and a first implementation. Probe real
+   Nix until the `output:out:sha256:...` fingerprint and the base-32 encoding
+   reproduce exactly. Until this is done, any implementation can emit a
+   derivation with the right shape and wrong paths, which looks correct and is
+   not.
+2. **Pin the oracle.** Choose the Nix version the differential test compares
+   against, and check whether `.drv` output is byte-stable across releases.
+   `latest` was used to derive the rules and must not be used to test against.
+3. **Decide the licence** before anyone else contributes. See Open questions.
+4. **Scaffold Python**: `impl/python/`, pinned 3.14.6, `mypy --strict`, and the
+   `ci.yml` skeleton calling Makefile targets.
+
+## State
+
+- [x] Thesis stated so it can fail.
+- [x] The mathematics that constrains the design (`docs/theory.md`).
+- [x] Signature drafted (`docs/spec/signature.md`).
+- [x] Serialization derived EMPIRICALLY from real Nix, with golden files
+      (`docs/spec/canonical.md`, `docs/spec/examples/`).
+- [ ] Store path computation. **Blocking.**
+- [ ] Any implementation at all.
+
+---
 
 The point of this plan is to make the thesis **cheap to disprove**. Phases 0 to
 2 are weeks, and they end with a yes or a no. Nothing after that is committed
@@ -245,3 +290,25 @@ This is arguably the most reusable idea in NixOS and nobody has extracted it.
 - Decisions that would otherwise be re-litigated get a file under
   `docs/decisions/`, with costs and a revisit condition, following the same
   convention as `iso-img`.
+
+---
+
+## Plan log
+
+Newest first. One line per change, so the shape of the thinking is recoverable
+without reading every commit.
+
+- **2026-08-01** Added the engineering baseline: pinned latest-stable
+  toolchains (Python 3.14.6, Go 1.26.5, Rust 1.97.1, OCaml 5.5.0), a typing
+  requirement per language enforced in CI, GitHub Actions with every job going
+  through a Makefile target, per-language documentation, and six real-world
+  examples in the spirit of nixpkgs.
+- **2026-08-01** Added Python as a fourth language, first in Phase 1, because
+  the spec is still moving and Python is the cheapest place to discover a rule
+  is wrong.
+- **2026-08-01** Phase 0 mostly done. The serialization rules were DERIVED from
+  real Nix rather than written from memory, because the manual does not publish
+  the grammar. Store path computation found to be still open, and promoted to
+  blocking.
+- **2026-08-01** Repository created. Plan built to be cheap to disprove:
+  phases 0 to 2 are weeks and end in a yes or a no.

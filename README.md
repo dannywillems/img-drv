@@ -78,27 +78,27 @@ CI. That is not a style preference: four implementations only span the typing
 axis if each one is honest about what its type system can actually enforce, and
 the table of "which invariants are unrepresentable here" is one of the real
 outputs of the project. Each targets the LATEST STABLE release of its language,
-pinned. See [`docs/plan.md`](docs/plan.md#engineering-baseline-runs-alongside-every-phase).
+pinned. See [`PLAN.md`](PLAN.md#engineering-baseline-runs-alongside-every-phase).
 
 ## Layout
 
 ```
+PLAN.md                 the living plan, and where tasks come from
 docs/theory.md          why finite products suffice, and what that forces
 docs/nix-internals.md   how Nix actually works, with sources
 docs/learning-nix.md    a path to learning Nix properly, in order
-docs/plan.md            phases, with a falsifiable MVP
 docs/spec/              the IR signature and canonical serialization,
                         with golden .drv files from real Nix
 ```
 
 ## Status
 
-Planning. See [`docs/plan.md`](docs/plan.md). Phase 0 to 2 are weeks of work and
+Planning. See [`PLAN.md`](PLAN.md). Phase 0 to 2 are weeks of work and
 either validate the thesis or kill it; nothing beyond that is committed to.
 
 ## Licence
 
-GPL-3.0. See the note in [`docs/plan.md`](docs/plan.md#open-questions): a
+GPL-3.0. See the note in [`PLAN.md`](PLAN.md#open-questions): a
 copyleft licence on a library intended for embedding in other people's stacks
 is in tension with the goal of easy adoption, and that tension should be
 resolved deliberately rather than by default.

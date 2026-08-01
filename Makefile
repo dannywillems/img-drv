@@ -1,4 +1,4 @@
-# img-drv. Nothing is implemented yet; see docs/plan.md.
+# img-drv. Nothing is implemented yet; see PLAN.md.
 #
 # Targets are declared ahead of the code on purpose: the conformance target is
 # the point of the project, and naming it now keeps the phases honest.
@@ -13,12 +13,12 @@ help: ## Ask for help!
 
 .PHONY: conformance
 conformance: ## Assert every eDSL emits byte-identical IR (the whole point)
-	@echo "not implemented: see docs/plan.md phase 2"
+	@echo "not implemented: see PLAN.md phase 2"
 	@exit 1
 
 .PHONY: differential
 differential: ## Compare our .drv against nix-instantiate's, byte for byte
-	@echo "not implemented: see docs/plan.md phase 1"
+	@echo "not implemented: see PLAN.md phase 1"
 	@exit 1
 
 .PHONY: build
