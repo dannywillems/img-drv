@@ -61,7 +61,7 @@ echo ">> corpus: $n derivations in $OUT"
 # Both checks run through the library, so the corpus gate and the unit tests
 # exercise exactly the same code.
 echo ">> round-trip check (parse then serialize must be byte-identical)"
-PYTHONPATH="$PY_IMPL/src" "$HERE/py.sh" roundtrip "$REL"
+"$HERE/py.sh" roundtrip "$REL"
 
 echo ">> store path check"
-PYTHONPATH="$PY_IMPL/src" "$HERE/py.sh" verify "$REL"
+"$HERE/py.sh" verify "$REL"
