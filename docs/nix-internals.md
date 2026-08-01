@@ -60,6 +60,70 @@ it will fetch up front, so the result is still verified.
 
 This is the piece `img-drv` most wants to reuse rather than reimplement.
 
+## Realisation: turning the recipe into files
+
+A derivation is inert data. `minimal.drv` says: run `/bin/sh` with
+`["-c","echo hi > $out"]` and this environment. Nothing has executed.
+`nix-instantiate` stops here, having evaluated the language down to
+derivations and written them to the store. The output path is nevertheless
+already fixed, even though nothing exists there yet: that is input addressing,
+the path is a hash of the RECIPE, not of the result.
+
+`nix-store --realise` (or `nix build`) turns a recipe into files. For each
+output path:
+
+1. **Does the path already exist?** If so, done, nothing runs. This is why
+   rebuilding an unchanged package is instant.
+2. **Can a substituter provide it?** Nix asks a binary cache "do you have this
+   path?", and because the path was computed from the recipe the cache can
+   answer WITHOUT building anything. If yes, it downloads a prebuilt result.
+   This is why most Nix users never compile anything.
+3. **Otherwise build it**, having first realised every `inputDrvs` entry
+   recursively, which is the dependency graph doing its work.
+
+The build itself runs `builder` with `args` in a sandbox:
+
+- a fresh mount namespace containing only the declared inputs, the closure of
+  `inputDrvs` and `inputSrcs`, and nothing else from the system
+- no network, which is why a plain build cannot fetch anything
+- a scrubbed environment holding exactly the derivation's `env`
+- an empty writable `$TMPDIR`, typically an unprivileged build user, and
+  timestamps normalised to 1970 so archives and mtimes are deterministic
+
+The builder writes to `$out`, which is just an environment variable holding the
+predetermined path. That is why `echo hi > $out` works at all.
+
+For a real package the builder is not `/bin/sh` directly but bash from the
+store, running a script that does the familiar `./configure && make && make
+install` with `--prefix=$out`. Nothing exotic: real compilers producing real
+binaries. The only unusual parts are WHERE the inputs come from (store paths,
+not `/usr`) and WHERE the output goes.
+
+When the builder exits, Nix makes the output read-only, scans it for references
+to other store paths (the runtime closure is discovered by literally looking
+for store path strings inside the files), and registers it in its database.
+
+### The fixed-output escape hatch
+
+Something has to download source tarballs, and builds have no network. Hence
+the fixed-output derivation, which declares its result hash UP FRONT. Because
+the output is verified against that hash, network access is safe: nothing can
+be smuggled in, since the bytes must match. Every `fetchurl` in nixpkgs is one
+of these.
+
+### Why this is exactly what img-drv reuses
+
+The sandboxing, the store database, garbage collection, the substituter
+protocol and reference scanning are the hard 90%, and none of it is being
+rebuilt. Emitting a byte-correct `.drv` is the whole interface: hand it to
+`nix-store --realise` and all of that comes for free.
+
+Which is why store path computation had to be exactly right. Wrong hashes
+produce a syntactically valid derivation that no cache can ever satisfy, that
+silently rebuilds the world, and whose outputs land at paths nothing else
+refers to. Right shape, wrong identity. See
+[`spec/store-paths.md`](spec/store-paths.md).
+
 ## Atomic activation is a symlink rename
 
 `/run/current-system` points at a store path. A "generation" is a symlink.
@@ -102,8 +166,8 @@ Source: <https://snix.dev/blog/announcing-snix/>, <https://tvix.dev/>
 - [x] Exact ATerm grammar and escaping rules, field by field. DONE, and
       derived empirically because the manual does not publish the grammar.
       See `spec/canonical.md`.
-- [ ] Exact store path hash computation for input-addressed derivations,
-      including the `output:out:sha256:...` style fingerprint strings.
+- [x] Exact store path hash computation. SOLVED and verified against real
+      Nix; see `spec/store-paths.md` and `scripts/store_paths.py`.
 - [x] How `inputDrvs` names outputs: `(drvPath, [outputNames])`. Multi-entry
       sort order is still open.
 - [ ] Whether `nix-instantiate` output is byte-stable across Nix versions, and

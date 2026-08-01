@@ -20,18 +20,15 @@ How it is used:
 
 Ordered. The top item is the next thing to do.
 
-1. **Work out store path computation empirically.** BLOCKING Phase 1, and the
-   only thing standing between the spec and a first implementation. Probe real
-   Nix until the `output:out:sha256:...` fingerprint and the base-32 encoding
-   reproduce exactly. Until this is done, any implementation can emit a
-   derivation with the right shape and wrong paths, which looks correct and is
-   not.
-2. **Pin the oracle.** Choose the Nix version the differential test compares
+1. **Pin the oracle.** Choose the Nix version the differential test compares
    against, and check whether `.drv` output is byte-stable across releases.
    `latest` was used to derive the rules and must not be used to test against.
-3. **Decide the licence** before anyone else contributes. See Open questions.
-4. **Scaffold Python**: `impl/python/`, pinned 3.14.6, `mypy --strict`, and the
-   `ci.yml` skeleton calling Makefile targets.
+2. **Decide the licence** before anyone else contributes. See Open questions.
+3. **Scaffold Python**: `impl/python/`, pinned 3.14.6, `mypy --strict`, and the
+   `ci.yml` skeleton calling Makefile targets. `scripts/store_paths.py` is the
+   verified reference to port from, and its self-check is the first test.
+4. **Multi-entry `inputDrvs` sorting**, the one spec question the golden files
+   do not answer, because every example has at most one input.
 
 ## State
 
@@ -40,7 +37,9 @@ Ordered. The top item is the next thing to do.
 - [x] Signature drafted (`docs/spec/signature.md`).
 - [x] Serialization derived EMPIRICALLY from real Nix, with golden files
       (`docs/spec/canonical.md`, `docs/spec/examples/`).
-- [ ] Store path computation. **Blocking.**
+- [x] Store path computation. Solved and verified, 8/8 golden paths
+      reproduced, including one derivation reconstructed from scratch
+      (`docs/spec/store-paths.md`, `scripts/store_paths.py`).
 - [ ] Any implementation at all.
 
 ---
@@ -243,6 +242,37 @@ Each example carries the equivalent Nix expression next to it, so the
 differential test covers it too. An example is not finished until it BUILDS
 through a real Nix store, not merely until it serialises.
 
+## Phase 4 (speculative): the Nix language as a front-end, and round trips
+
+Only once the IR exists in all four languages, and clearly after Phase 3. Noted
+now because it changes what the IR is FOR, and that is worth knowing early.
+
+If the IR is genuinely the initial object, then the Nix language is just
+another presentation of it, and two things follow:
+
+- **A Nix front-end.** Parse the Nix language, evaluate it, emit our IR. OCaml
+  is the natural host: the grammar and the evaluator are exactly what ML was
+  designed for. This would let existing Nix code, including `flake.nix`, be
+  compiled to the IR and consumed by any of the four eDSLs.
+- **Round trips.** Lower the IR back into whichever surface a person prefers.
+  From the theory this is not a separate feature: every backend is an algebra,
+  and a pretty-printer for language X is just the algebra whose carrier is
+  X's syntax. The uniqueness of the homomorphism out of the initial object is
+  what makes "IR to any language" well posed at all.
+
+Honest caveats, since this is the part most likely to be underestimated:
+
+- Emitting derivations is a fraction of what a Nix EVALUATOR does. Laziness,
+  the fixed-point module system, `import`, string contexts and the whole of
+  nixpkgs' `lib` are the real surface, and a partial evaluator that handles
+  `flake.nix` but not nixpkgs is of limited use.
+- Round trips are only faithful up to the congruence in `theory.md` section 4.
+  IR to Nix to IR should be the identity ON THE QUOTIENT; expecting the
+  original TEXT back is a category error, and saying so up front avoids a
+  disappointment later.
+- Snix already has an evaluator. Reusing it may beat writing one, and that
+  comparison should be made before any parser is started.
+
 ## Phase 3 (conditional): the module system
 
 Only if 0 to 2 succeed, and only if there is an appetite for months rather than
@@ -294,6 +324,14 @@ This is arguably the most reusable idea in NixOS and nobody has extracted it.
 ---
 
 ## Plan log
+
+- **2026-08-01** Store path computation SOLVED and verified: 8/8 golden paths
+  reproduced from derivation text alone, including a derivation reconstructed
+  from scratch. The subtle part is an asymmetry, mask your own outputs but not
+  your inputs', established by testing all four combinations and keeping the
+  only one that reproduces Nix. Phase 1 is unblocked. Also added a Phase 4
+  sketch: a Nix front-end in OCaml and IR-to-any-language round trips, which
+  the initial-object argument makes well posed.
 
 Newest first. One line per change, so the shape of the thinking is recoverable
 without reading every commit.
