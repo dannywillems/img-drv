@@ -151,3 +151,86 @@ func ExampleCorpus() []CorpusEntry {
 		{"vk8wqbqg3k8w4134kwa0392kbc1953aq-mmm.drv", ExampleMmm()},
 	}
 }
+
+// The DIFFERENTIAL probe, described through the eDSL.
+//
+// scripts/probe.nix is instantiated by the pinned Nix on every run, and until
+// now only our PATH COMPUTATION was checked against the result: parse what Nix
+// emitted, recompute the paths, compare. The eDSL itself was checked only
+// against the golden files, which are checked in and therefore frozen.
+//
+// Describing the same five derivations here makes make differential a LIVE
+// oracle for the eDSL too: our bytes against bytes a real nix-instantiate
+// produced moments earlier, rather than against a file someone committed. A
+// frozen golden cannot notice the ORACLE moving; this can.
+
+// exampleNasty is the characters that defeat naive pattern matching, exactly as
+// the probe writes them.
+//
+// No trailing newline: the probe writes this as a ONE-LINE indented string, and
+// one that does not end in a newline does not gain one. Adding it was the first
+// thing the live oracle caught.
+const exampleNasty = "a \"quoted\" \\ backslash, a ],[ sequence, and a tab:\tdone"
+
+func repeatChar(c byte, n int) string {
+	out := make([]byte, n)
+	for i := range out {
+		out[i] = c
+	}
+	return string(out)
+}
+
+// ProbeFetched is fixed-output with FLAT ingestion: the fixed:out: scheme.
+func ProbeFetched() Drv {
+	b := exampleBase("fetched")
+	b.Args = []string{"-c", "echo hi > $out"}
+	b.FixedOutput = &FixedOutput{Hash: repeatChar('0', 64), Algo: SHA256}
+	return MustDerive(b)
+}
+
+// ProbeFetchedRec is fixed-output with RECURSIVE ingestion: the source kind.
+//
+// The declared hash is used DIRECTLY as the inner hash rather than wrapped in a
+// fingerprint. Missing this costs exactly one path in a real closure, which is
+// how it survived a hand-written corpus.
+func ProbeFetchedRec() Drv {
+	b := exampleBase("fetched-rec")
+	b.Args = []string{"-c", "mkdir $out"}
+	b.FixedOutput = &FixedOutput{
+		Hash: repeatChar('1', 64), Algo: SHA256, Mode: Recursive,
+	}
+	return MustDerive(b)
+}
+
+// Probe has four input edges covering every scheme above, plus the awkward
+// cases: several outputs, env out of order, and a value full of metacharacters.
+func Probe() Drv {
+	dep, dep2 := exampleEcho("dep-a", "a"), exampleEcho("dep-b", "b")
+	fetched, fetchedRec := ProbeFetched(), ProbeFetchedRec()
+	b := exampleBase("probe")
+	b.Args = []string{"-c", fmt.Sprintf("cat %s %s %s %s > $out",
+		dep.MustOutput("out"), dep2.MustOutput("out"),
+		fetched.MustOutput("out"), fetchedRec.MustOutput("out"))}
+	b.InputDrvs = []Dep{
+		dep.MustNeed(), dep2.MustNeed(), fetched.MustNeed(), fetchedRec.MustNeed(),
+	}
+	b.Outputs = Declare("out", "dev", "lib")
+	b.Env = map[string]JSONValue{
+		"zzz":   Str("last"),
+		"aaa":   Str("first"),
+		"mmm":   Str("middle"),
+		"nasty": Str(exampleNasty),
+	}
+	return MustDerive(b)
+}
+
+// ProbeCorpus is every derivation the probe closure contains.
+func ProbeCorpus() []Drv {
+	return []Drv{
+		exampleEcho("dep-a", "a"),
+		exampleEcho("dep-b", "b"),
+		ProbeFetched(),
+		ProbeFetchedRec(),
+		Probe(),
+	}
+}

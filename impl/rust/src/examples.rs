@@ -17,7 +17,7 @@
 use std::collections::BTreeMap;
 
 use crate::derivation::OutputName;
-use crate::edsl::{Build, Drv, FixedOutput, HashAlgo, derivation};
+use crate::edsl::{Build, Drv, FixedOutput, HashAlgo, HashMode, derivation};
 use crate::json::JsonValue;
 
 /// Every example targets one system, so the corpus is comparable across
@@ -196,5 +196,101 @@ pub fn corpus() -> Vec<(&'static str, Drv)> {
         ),
         ("v27a425rg4n7prwzpyyw0y1fw2ssc46f-multi.drv", multi()),
         ("vk8wqbqg3k8w4134kwa0392kbc1953aq-mmm.drv", mmm()),
+    ]
+}
+
+// The DIFFERENTIAL probe, described through the eDSL.
+//
+// `scripts/probe.nix` is instantiated by the pinned Nix on every run, and until
+// now only our PATH COMPUTATION was checked against the result: parse what Nix
+// emitted, recompute the paths, compare. The eDSL itself was checked only
+// against the golden files, which are checked in and therefore frozen.
+//
+// Describing the same five derivations here makes `make differential` a LIVE
+// oracle for the eDSL too: our bytes against bytes a real nix-instantiate
+// produced moments earlier, rather than against a file someone committed. A
+// frozen golden cannot notice the ORACLE moving; this can.
+
+/// The characters that defeat naive pattern matching, exactly as the probe
+/// writes them.
+///
+/// No trailing newline: the probe writes this as a ONE-LINE indented string,
+/// and one that does not end in a newline does not gain one. Adding it was the
+/// first thing the live oracle caught.
+const NASTY: &str = "a \"quoted\" \\ backslash, a ],[ sequence, and a tab:\tdone";
+
+fn probe_dep(name: &str, word: &str) -> Drv {
+    echo(name, word)
+}
+
+/// Fixed-output, FLAT ingestion: the `fixed:out:` fingerprint scheme.
+pub fn probe_fetched() -> Drv {
+    derivation(Build {
+        args: vec!["-c".into(), "echo hi > $out".into()],
+        fixed_output: Some(FixedOutput::new("0".repeat(64), HashAlgo::Sha256)),
+        ..base("fetched")
+    })
+    .expect("a fixed example is valid")
+}
+
+/// Fixed-output, RECURSIVE ingestion: the `source` kind.
+///
+/// The declared hash is used DIRECTLY as the inner hash rather than wrapped in
+/// a fingerprint. Missing this costs exactly one path in a real closure, which
+/// is how it survived a hand-written corpus.
+pub fn probe_fetched_rec() -> Drv {
+    let mut fixed = FixedOutput::new("1".repeat(64), HashAlgo::Sha256);
+    fixed.mode = HashMode::Recursive;
+    derivation(Build {
+        args: vec!["-c".into(), "mkdir $out".into()],
+        fixed_output: Some(fixed),
+        ..base("fetched-rec")
+    })
+    .expect("a fixed example is valid")
+}
+
+/// Four input edges covering every scheme above, plus the awkward cases.
+pub fn probe() -> Drv {
+    let (dep, dep2) = (probe_dep("dep-a", "a"), probe_dep("dep-b", "b"));
+    let (fetched, fetched_rec) = (probe_fetched(), probe_fetched_rec());
+    let cat = format!(
+        "cat {} {} {} {} > $out",
+        dep.output("out").expect("out"),
+        dep2.output("out").expect("out"),
+        fetched.output("out").expect("out"),
+        fetched_rec.output("out").expect("out"),
+    );
+    derivation(Build {
+        args: vec!["-c".into(), cat],
+        input_drvs: vec![
+            dep.needs(&[]).expect("out"),
+            dep2.needs(&[]).expect("out"),
+            fetched.needs(&[]).expect("out"),
+            fetched_rec.needs(&[]).expect("out"),
+        ],
+        outputs: Some(vec![
+            OutputName::new("out"),
+            OutputName::new("dev"),
+            OutputName::new("lib"),
+        ]),
+        env: BTreeMap::from([
+            ("zzz".to_owned(), "last".into()),
+            ("aaa".to_owned(), "first".into()),
+            ("mmm".to_owned(), "middle".into()),
+            ("nasty".to_owned(), NASTY.into()),
+        ]),
+        ..base("probe")
+    })
+    .expect("a fixed example is valid")
+}
+
+/// Every derivation the probe closure contains.
+pub fn probe_corpus() -> Vec<Drv> {
+    vec![
+        probe_dep("dep-a", "a"),
+        probe_dep("dep-b", "b"),
+        probe_fetched(),
+        probe_fetched_rec(),
+        probe(),
     ]
 }

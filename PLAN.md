@@ -24,11 +24,7 @@ Ordered. The top item is the next thing to do.
    re-emitted. Parsing is the easy half and is nearly done; the evaluator has
    no `derivation` primop yet, and without one no parsed package can become
    IR. This is where `import`, laziness and string contexts arrive.
-2. **Describe `scripts/probe.nix` in the eDSL** so `make differential` becomes
-   a LIVE oracle for the eDSL rather than only for the parser. The ten golden
-   examples already pin the eDSL against real Nix, but they are checked-in
-   files; the probe runs against a real `nix-instantiate` on every push.
-3. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
+2. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
    format (`docs/spec/canonical.md` section 3). Now also the one gap in the
    `.drv` path rule: no derivation we produce has a non-empty `inputSrcs`, so
    that half of the references set is verified only by reading real files.
@@ -63,6 +59,11 @@ Ordered. The top item is the next thing to do.
       than a printer bug; writing those eight down as a specification is what
       made the other three pass first time. See `docs/abstractions.md` entries
       13 and 14.
+- [x] **The eDSL has a LIVE oracle.** `make differential` now describes the
+      probe's five derivations through all four eDSLs and diffs them against
+      bytes a real `nix-instantiate` produced moments earlier, rather than
+      against a committed golden. A frozen golden cannot notice the oracle
+      moving; `docs/abstractions.md` entry 16.
 - [x] **Go's sum encoding decided and converted.** `impl/go/json.go` uses a
       sealed interface, like `impl/go/nix/`; verified byte-neutral, which is
       the only acceptable outcome for a type that decides store paths.
@@ -514,6 +515,12 @@ Resolved, kept here only so the resolution is findable:
 ---
 
 ## Plan log
+
+- **2026-08-02** The probe described through all four eDSLs, making
+  `make differential` a live oracle for the eDSL rather than only for the path
+  computation. It caught a transcription error on its first run: one trailing
+  newline on an indented string, which moved an input hash and therefore three
+  output paths, and which no committed golden could have caught.
 
 - **2026-08-02** Converted Go's JSON sum from a discriminant struct to a sealed
   interface. It had been held back as needing a decision, and the reason did not

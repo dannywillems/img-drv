@@ -9,6 +9,7 @@
     python -m img_drv parsecheck <dir>  parse real .nix files, diff the tree
     python -m img_drv reparse <dir>     parse what we emitted; must be the same
     python -m img_drv worked <dir>      emit the worked example
+    python -m img_drv probe <dir>       emit the differential probe
 
 All exit non-zero on any failure, which is what makes them usable as CI
 gates. `examples` is what `make conformance` drives: each implementation
@@ -243,6 +244,17 @@ def worked(directory: pathlib.Path) -> int:
     return 0
 
 
+def probe(directory: pathlib.Path) -> int:
+    """Emit the differential probe's derivations, named as in the store."""
+    from .examples import probe_corpus  # noqa: PLC0415
+
+    corpus = probe_corpus()
+    for d in corpus:
+        d.write(directory)
+    print(f"{len(corpus)} probe derivations written")
+    return 0
+
+
 COMMANDS = {
     "verify": verify,
     "roundtrip": roundtrip,
@@ -251,6 +263,7 @@ COMMANDS = {
     "parsecheck": parsecheck,
     "reparse": reparse,
     "worked": worked,
+    "probe": probe,
     "drvpaths": drvpaths,
     "examples": examples,
 }

@@ -166,3 +166,104 @@ let corpus () =
     ("v27a425rg4n7prwzpyyw0y1fw2ssc46f-multi.drv", multi ());
     ("vk8wqbqg3k8w4134kwa0392kbc1953aq-mmm.drv", mmm ());
   ]
+
+(* The DIFFERENTIAL probe, described through the eDSL.
+
+   [scripts/probe.nix] is instantiated by the pinned Nix on every run, and until
+   now only our PATH COMPUTATION was checked against the result: parse what Nix
+   emitted, recompute the paths, compare. The eDSL itself was checked only
+   against the golden files in [docs/spec/examples/], which are checked in and
+   therefore frozen.
+
+   Describing the same five derivations here makes [make differential] a LIVE
+   oracle for the eDSL as well: our bytes against bytes a real nix-instantiate
+   produced moments earlier, rather than against a file someone committed. If
+   upstream Nix changes anything about how these are serialized, this is what
+   notices.
+
+   Every case is here because it once cost a wrong answer, which is why the
+   probe is not simply the conformance corpus again: a fixed-output derivation
+   with RECURSIVE ingestion appears in neither, and exactly one derivation in a
+   226-derivation closure exercised it. *)
+
+let probe_dep name word =
+  derive_exn (base name ~args:["-c"; Printf.sprintf "echo %s > $out" word] ())
+
+(** Fixed-output, FLAT ingestion: the [fixed:out:] fingerprint scheme. *)
+let probe_fetched () =
+  derive_exn
+    (base
+       "fetched"
+       ~args:["-c"; "echo hi > $out"]
+       ~fixed_output:(Edsl.fixed ~algo:Edsl.Sha256 (String.make 64 '0'))
+       ())
+
+(** Fixed-output, RECURSIVE ingestion: the [source] kind, with the declared
+    hash used DIRECTLY as the inner hash rather than wrapped in a fingerprint.
+    Missing this costs exactly one path in a real closure, which is how it
+    survived a hand-written corpus. *)
+let probe_fetched_rec () =
+  derive_exn
+    (base
+       "fetched-rec"
+       ~args:["-c"; "mkdir $out"]
+       ~fixed_output:
+         (Edsl.fixed
+            ~mode:Edsl.Recursive
+            ~algo:Edsl.Sha256
+            (String.make 64 '1'))
+       ())
+
+(** The probe itself: four input edges covering every scheme above, several
+    outputs, env declared out of order, and a value containing the characters
+    that defeat pattern matching. *)
+let probe () =
+  let dep = probe_dep "dep-a" "a" in
+  let dep2 = probe_dep "dep-b" "b" in
+  let fetched = probe_fetched () in
+  let fetched_rec = probe_fetched_rec () in
+  derive_exn
+    (base
+       "probe"
+       ~args:
+         [
+           "-c";
+           Printf.sprintf
+             "cat %s %s %s %s > $out"
+             (output_exn dep "out")
+             (output_exn dep2 "out")
+             (output_exn fetched "out")
+             (output_exn fetched_rec "out");
+         ]
+       ~input_drvs:
+         [
+           needs_exn dep;
+           needs_exn dep2;
+           needs_exn fetched;
+           needs_exn fetched_rec;
+         ]
+       ~outputs:[name_exn "out"; name_exn "dev"; name_exn "lib"]
+       ~env:
+         [
+           ("zzz", Json.String "last");
+           ("aaa", Json.String "first");
+           ("mmm", Json.String "middle");
+           (* No trailing newline: the probe writes this as a ONE-LINE indented
+              string, and an indented string that does not end in a newline
+              does not gain one. Adding it here was the first thing the live
+              oracle caught, which is the point of having one. *)
+           ( "nasty",
+             Json.String
+               "a \"quoted\" \\ backslash, a ],[ sequence, and a tab:\tdone" );
+         ]
+       ())
+
+(** Every derivation the probe closure contains. *)
+let probe_corpus () =
+  [
+    probe_dep "dep-a" "a";
+    probe_dep "dep-b" "b";
+    probe_fetched ();
+    probe_fetched_rec ();
+    probe ();
+  ]

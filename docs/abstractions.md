@@ -831,3 +831,41 @@ oracle for a PARSER, since it pins more than behaviour does, and exactly why a
 round-trip law over a TRANSPILER has to be stated in the quotient. Two arrows,
 two different notions of equality, and getting them the same way round is the
 whole content of this entry.
+
+## 16. A frozen oracle cannot notice the oracle moving
+
+**Structure:** none new. This is entry 10's point extended along a second axis,
+TIME, and it is worth separating because the fix is different.
+
+Entry 10 was about SPACE: four implementations agreeing with each other cannot
+tell you the spec is right, because they can share a non-standard model. The
+fix was an external oracle.
+
+This is about time. `docs/spec/examples/` holds eleven `.drv` files that real
+Nix emitted, and `make conformance` diffs the eDSL against them. That IS an
+external oracle, and it is frozen. It answers "do we still agree with what Nix
+did on the day we committed these", which is a strictly weaker question than
+"do we agree with Nix".
+
+A frozen golden cannot detect the oracle MOVING. If a future Nix changes how it
+serializes anything, the golden and our output continue to agree with each
+other and both drift away from the thing they are supposed to model. The pin
+(`scripts/pins.env`) makes that failure reproducible rather than mysterious; it
+does not make it visible.
+
+`make differential` now closes it. The probe is instantiated by a real
+`nix-instantiate` on every run, and each of the four eDSLs describes the same
+five derivations and is diffed against the bytes that run just produced.
+
+**It earned its place immediately.** Transcribing `scripts/probe.nix` into the
+eDSL, one value gained a trailing newline: the probe writes it as a ONE-LINE
+indented string, and an indented string that does not end in a newline does not
+gain one. Four of five derivations matched; the fifth differed by that
+character, which moved its input hash, which moved all three output paths. No
+committed golden would ever have caught it, because no committed golden
+contains that string.
+
+**The general rule.** A test corpus you generated once is a photograph of an
+oracle, not the oracle. Prefer a gate that RE-ASKS. When re-asking is
+expensive, pin the oracle so the photograph is at least reproducible, and be
+explicit that the pin buys reproducibility and not currency.

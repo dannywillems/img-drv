@@ -123,6 +123,13 @@ let emit_nix directory =
   Printf.printf "%d expressions written to %s\n" (List.length corpus) directory ;
   0
 
+(** Emit the differential probe's derivations, named as in the store. *)
+let emit_probe directory =
+  let corpus = Examples.probe_corpus () in
+  List.iter (fun d -> ignore (Edsl.write d directory)) corpus ;
+  Printf.printf "%d probe derivations written\n" (List.length corpus) ;
+  0
+
 (** Emit the worked example: a real package, through a real overlay. *)
 let emit_worked directory =
   let rec mkdir_p d =
@@ -342,6 +349,7 @@ let () =
         | "parsecheck" -> parse_check directory
         | "reparse" -> reparse directory
         | "worked" -> emit_worked directory
+        | "probe" -> emit_probe directory
         | other ->
             Printf.eprintf "unknown command: %s\n" other ;
             exit 2
@@ -350,6 +358,6 @@ let () =
   | _ ->
       prerr_endline
         "usage: img-drv \
-         [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse|worked] \
+         [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse|worked|probe] \
          <directory>" ;
       exit 2

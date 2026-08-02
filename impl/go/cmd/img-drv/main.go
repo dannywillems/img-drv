@@ -9,6 +9,7 @@
 //	img-drv parsecheck <dir>  parse real .nix files, diff the tree
 //	img-drv reparse <dir>     parse what we emitted; must be the same tree
 //	img-drv worked <dir>      emit the worked example
+//	img-drv probe <dir>       emit the differential probe
 //
 // All exit non-zero on any failure, which is what makes them usable as CI
 // gates. The subcommands and their output match the Python and Rust
@@ -29,7 +30,7 @@ import (
 
 func main() {
 	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: img-drv [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse|worked] <dir>")
+		fmt.Fprintln(os.Stderr, "usage: img-drv [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse|worked|probe] <dir>")
 		os.Exit(2)
 	}
 	command, directory := os.Args[1], os.Args[2]
@@ -58,6 +59,8 @@ func main() {
 		code, err = reparse(directory)
 	case "worked":
 		code, err = worked(directory)
+	case "probe":
+		code, err = emitProbe(directory)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", command)
 		os.Exit(2)
@@ -241,6 +244,18 @@ func parsecheck(directory string) (int, error) {
 	if bad > 0 {
 		return 1, nil
 	}
+	return 0, nil
+}
+
+// emitProbe writes the differential probe's derivations, named as in the store.
+func emitProbe(directory string) (int, error) {
+	corpus := imgdrv.ProbeCorpus()
+	for _, d := range corpus {
+		if _, err := d.Write(directory); err != nil {
+			return 0, err
+		}
+	}
+	fmt.Printf("%d probe derivations written\n", len(corpus))
 	return 0, nil
 }
 

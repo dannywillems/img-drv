@@ -20,6 +20,10 @@ from collections.abc import Callable, Mapping
 
 from .edsl import Drv, FixedOutput, derivation
 
+#: The characters that defeat naive pattern matching, exactly as the probe
+#: writes them.
+NASTY = 'a "quoted" \\ backslash, a ],[ sequence, and a tab:\tdone'
+
 __all__ = ["CORPUS", "SH", "SYSTEM"]
 
 #: Every example targets one system, so the corpus is comparable across
@@ -168,3 +172,86 @@ CORPUS: Mapping[str, Callable[[], Drv]] = {
     "v27a425rg4n7prwzpyyw0y1fw2ssc46f-multi.drv": multi,
     "vk8wqbqg3k8w4134kwa0392kbc1953aq-mmm.drv": mmm,
 }
+
+
+# The DIFFERENTIAL probe, described through the eDSL.
+#
+# `scripts/probe.nix` is instantiated by the pinned Nix on every run, and until
+# now only our PATH COMPUTATION was checked against the result: parse what Nix
+# emitted, recompute the paths, compare. The eDSL itself was checked only
+# against the golden files, which are checked in and therefore frozen.
+#
+# Describing the same five derivations here makes `make differential` a LIVE
+# oracle for the eDSL too: our bytes against bytes a real nix-instantiate
+# produced moments earlier, rather than against a file someone committed. A
+# frozen golden cannot notice the ORACLE moving; this can.
+
+
+def probe_dep(name: str, word: str) -> Drv:
+    return derivation(
+        name=name, system=SYSTEM, builder=SH, args=["-c", f"echo {word} > $out"]
+    )
+
+
+def probe_fetched() -> Drv:
+    """Fixed-output, FLAT ingestion: the ``fixed:out:`` fingerprint scheme."""
+    return derivation(
+        name="fetched",
+        system=SYSTEM,
+        builder=SH,
+        args=["-c", "echo hi > $out"],
+        fixed_output=FixedOutput(hash="0" * 64, algo="sha256"),
+    )
+
+
+def probe_fetched_rec() -> Drv:
+    """Fixed-output, RECURSIVE ingestion: the ``source`` kind.
+
+    The declared hash is used DIRECTLY as the inner hash rather than wrapped in
+    a fingerprint. Missing this costs exactly one path in a real closure, which
+    is how it survived a hand-written corpus.
+    """
+    return derivation(
+        name="fetched-rec",
+        system=SYSTEM,
+        builder=SH,
+        args=["-c", "mkdir $out"],
+        fixed_output=FixedOutput(
+            hash="1" * 64, algo="sha256", mode="recursive"
+        ),
+    )
+
+
+def probe() -> Drv:
+    """Four input edges covering every scheme above, plus the awkward cases."""
+    dep, dep2 = probe_dep("dep-a", "a"), probe_dep("dep-b", "b")
+    fetched, fetched_rec = probe_fetched(), probe_fetched_rec()
+    cat = " ".join(d.output() for d in (dep, dep2, fetched, fetched_rec))
+    return derivation(
+        name="probe",
+        system=SYSTEM,
+        builder=SH,
+        args=["-c", f"cat {cat} > $out"],
+        input_drvs=[dep, dep2, fetched, fetched_rec],
+        outputs=["out", "dev", "lib"],
+        env={
+            "zzz": "last",
+            "aaa": "first",
+            "mmm": "middle",
+            # No trailing newline: the probe writes this as a ONE-LINE indented
+            # string, and one that does not end in a newline does not gain one.
+            # Adding it was the first thing the live oracle caught.
+            "nasty": NASTY,
+        },
+    )
+
+
+def probe_corpus() -> list[Drv]:
+    """Every derivation the probe closure contains."""
+    return [
+        probe_dep("dep-a", "a"),
+        probe_dep("dep-b", "b"),
+        probe_fetched(),
+        probe_fetched_rec(),
+        probe(),
+    ]

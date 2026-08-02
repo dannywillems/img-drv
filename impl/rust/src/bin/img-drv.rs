@@ -9,6 +9,7 @@
 //! img-drv parsecheck <dir>  parse real .nix files, diff the tree
 //! img-drv reparse <dir>     parse what we emitted; must be the same tree
 //! img-drv worked <dir>      emit the worked example
+//! img-drv probe <dir>       emit the differential probe
 //! ```
 //!
 //! All exit non-zero on any failure, which is what makes them usable as CI
@@ -26,7 +27,7 @@ fn main() -> ExitCode {
     let [command, directory] = args.as_slice() else {
         eprintln!(
             "usage: img-drv \
-             [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse|worked] <dir>"
+             [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse|worked|probe] <dir>"
         );
         return ExitCode::from(2);
     };
@@ -44,6 +45,7 @@ fn main() -> ExitCode {
         "parsecheck" => parsecheck(&directory),
         "reparse" => reparse(&directory),
         "worked" => worked(&directory),
+        "probe" => emit_probe(&directory),
         other => {
             eprintln!("unknown command: {other}");
             return ExitCode::from(2);
@@ -313,5 +315,15 @@ fn worked(directory: &Path) -> Outcome {
     let text = img_drv::nix::to_nix(&img_drv::nix::worked_example::term());
     std::fs::write(directory.join("worked-example.nix"), format!("{text}\n"))?;
     println!("worked example written");
+    Ok(0)
+}
+
+/// Emit the differential probe's derivations, named as in the store.
+fn emit_probe(directory: &Path) -> Outcome {
+    let corpus = img_drv::examples::probe_corpus();
+    for d in &corpus {
+        d.write(directory)?;
+    }
+    println!("{} probe derivations written", corpus.len());
     Ok(0)
 }
