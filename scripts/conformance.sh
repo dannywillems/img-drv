@@ -24,7 +24,7 @@ OUT="$REPO/build/conformance"
 GOLDEN="$REPO/docs/spec/examples"
 
 rm -rf "$OUT"
-IMPLS="python rust go"
+IMPLS="python rust go ocaml"
 mkdir -p "$OUT/nix"
 for impl in $IMPLS; do mkdir -p "$OUT/$impl"; done
 
@@ -36,6 +36,9 @@ echo ">> rust emits the corpus"
 
 echo ">> go emits the corpus"
 "$HERE/go.sh" examples build/conformance/go
+
+echo ">> ocaml emits the corpus"
+"$HERE/ml.sh" examples build/conformance/ocaml
 
 # The golden files carry a trailing newline because they are text files in a
 # repository; the store objects do not. Strip it so the comparison is against

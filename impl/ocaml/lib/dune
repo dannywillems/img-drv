@@ -1,0 +1,6 @@
+(library
+ (name img_drv)
+ ; Warnings as errors, in every profile rather than only in dev. A warning that
+ ; CI treats as fatal and a laptop does not is a warning nobody reads.
+ (flags
+  (:standard -w +a-4-40-42-44-70 -warn-error +a)))

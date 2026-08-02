@@ -190,16 +190,25 @@ order sometimes matters in NixOS and usually does not.
 
 ### Verified against source
 
-Checked in `nixpkgs` master rather than recalled, because this section
-previously asserted the wrong thing from memory:
+Checked against source rather than recalled, because this section previously
+asserted the wrong thing from memory.
+
+Pinned to nixpkgs commit
+[`cd017c33`](https://github.com/NixOS/nixpkgs/tree/cd017c33bbf56d9d918cb6d21b3118acb4cee58d),
+not to `master`, for the same reason the Nix oracle is pinned by digest in
+`scripts/pins.env`: a branch is a mutable pointer, and line numbers cited
+against one rot silently. Re-verify at a NEW commit when updating this table,
+and move the pin in the same edit.
 
 | claim | source |
 | --- | --- |
 | `mkOptionDefault` 1500, `mkDefault` 1000, unset 100, `mkImageMediaOverride` 60, `mkForce` 50, `mkVMOverride` 10 | `lib/modules.nix:1569-1574` |
-| the merge keeps only MINIMUM-priority definitions | `lib/modules.nix:1433`, a `foldl'` with `min` |
-| `mkBefore` 500, `mkAfter` 1500, default order 1000 | `lib/modules.nix:1605-1606` |
+| the merge keeps only MINIMUM-priority definitions | `lib/modules.nix:1433`, a `foldl'` with `min` over `9999` |
+| `mkBefore` 500, default order 1000, `mkAfter` 1500 | `lib/modules.nix:1605-1607` |
 | `bool`, `int`, `float`, `str` use `mergeEqualOption` | `lib/types.nix:376,399,482,519` |
-| `mergeOneOption = mergeUniqueOption { message = ""; }` | `lib/options.nix:451` |
+| `mergeOneOption = mergeUniqueOption { message = ""; }`, which throws on two definitions even when EQUAL | `lib/options.nix:451,470` |
+| `listOf` merges by concatenating definitions in order | `lib/types.nix:711` |
+| `mergeDefaultOption`, the fallback when a type names no merge, concatenates lists AND strings and ORs booleans, so it is non-commutative too | `lib/options.nix:422` |
 | `imports` depending on `config` is NOT statically forbidden | `lib/modules.nix:269`: it fails as infinite recursion, with an `addErrorContext` hint naming the likely cause |
 
 One naming trap worth carrying: the variable computing that minimum is called

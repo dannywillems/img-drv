@@ -327,3 +327,65 @@ visibility is capitalisation and a package has one exported namespace, so the
 type and its constructor collide. A "portable" API turns out not to be quite
 portable in its SPELLING even where it is exactly portable in its meaning. The
 full tally is in `impl/go/README.md`.
+
+## 8. The other end of the axis: what a type can make unrepresentable
+
+**Date:** 2026-08-02, with the OCaml port. All four implementations now exist.
+
+**What was being tested.** Go asked whether the signature survives with almost
+no type system. OCaml asks the opposite: how much of the specification can a
+type system make UNREPRESENTABLE rather than merely checked? That is the axis
+`README.md` says the four languages exist to span, and this is its far end.
+
+**Result: exactly one row moves, and you can see it in the error type.** Every
+other implementation validates the derivation name inside its constructor and
+carries an `Invalid_name` case in its error enum. `Types.Name.t` is abstract
+and its only constructor validates, so by the time `derive` is called an
+invalid name is not a value that can exist, and `Edsl.error` has no such case.
+An abstract type with a smart constructor moved an invariant from "checked at
+construction" to "unrepresentable", and the shape of the error type is the
+receipt.
+
+Also worth keeping: three distinct identifier types come from ONE generative
+functor applied three times, where Rust needs three newtype declarations and Go
+three defined types.
+
+**Result: the last two rows do not move, in any language.** "Outputs
+non-empty" and above all "the recorded paths match this derivation's own hash"
+are runtime checks in Python, Rust, Go AND OCaml. They compare a value against
+COMPUTED data. This is now checked across the full typing axis rather than
+conjectured from three points, and it sharpens entry 6's claim into something
+stronger:
+
+> A type system distinguishes what you CONSTRUCT. A verifier is still required
+> for what you COMPUTE. No amount of type strength converts the second into the
+> first.
+
+The wire type shows the same boundary from the other side: `hash_algo` is a
+`string` and not the variant in all four implementations, because parsing must
+be TOTAL over whatever real Nix wrote. A type system makes illegal states
+unrepresentable only where you are the one constructing them.
+
+**A third language-specific trap, completing a pattern.** OCaml's `Digest` is
+MD5 only, so this implementation writes its own SHA-256, and the first version
+was wrong: a custom infix operator's precedence comes from its FIRST CHARACTER,
+so `( &% ) = Int32.logand` sits at the level of `&&`, below `^%`, and
+`a &% b ^% c` silently parses as `a &% (b ^% c)`. The FIPS 180-4 vectors caught
+it on the first run.
+
+Three ports, three traps, all in the same function:
+
+| language | trap | how it failed |
+| --- | --- | --- |
+| Rust | `u8 << 8` panics in debug, is MASKED to `<< 0` in release | release-only wrong answer |
+| Go | nil and empty slices behave alike, and the bytes depend on the difference | would have been silently wrong |
+| OCaml | custom operator precedence comes from the first character | wrong parse tree, no warning |
+
+None of these is about the signature. All three are in the layer where a value
+is encoded rather than described, and each was caught by a gate that existed
+before the code did. That is the argument for writing the vectors first.
+
+**Conformance now spans the whole axis.** Ten intents, four implementations,
+byte-identical to each other and to what real Nix emitted. The portability
+claim is as well supported as this kind of claim can be, which is what
+`PLAN.md` phase 2 set as its exit test.

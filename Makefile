@@ -22,13 +22,13 @@ differential: ## Recompute a real Nix closure's store paths and compare
 	./scripts/differential.sh
 
 .PHONY: build
-build: python-build rust-build go-build ## Build every implementation
+build: python-build rust-build go-build ocaml-build ## Build every implementation
 
 .PHONY: test
-test: python-test rust-test go-test ## Run every test suite
+test: python-test rust-test go-test ocaml-test ## Run every test suite
 
 .PHONY: lint
-lint: python-lint rust-lint go-lint lint-shell ## Run every linter
+lint: python-lint rust-lint go-lint ocaml-lint lint-shell ## Run every linter
 
 .PHONY: python-test
 python-test: ## Test the Python implementation
@@ -66,11 +66,24 @@ go-lint: ## gofmt and go vet the Go implementation
 go-build: ## Build the Go implementation
 	./scripts/go-check.sh build
 
+.PHONY: ocaml-test
+ocaml-test: ## Test the OCaml implementation
+	./scripts/ml-check.sh test
+
+.PHONY: ocaml-lint
+ocaml-lint: ## Check OCaml formatting with ocamlformat
+	./scripts/ml-check.sh lint
+
+.PHONY: ocaml-build
+ocaml-build: ## Build the OCaml implementation
+	./scripts/ml-check.sh build
+
 .PHONY: format
 format: ## Format code
 	./scripts/py-check.sh format
 	./scripts/rs-check.sh format
 	./scripts/go-check.sh format
+	./scripts/ml-check.sh format
 
 .PHONY: clean
 clean: ## Remove build artifacts

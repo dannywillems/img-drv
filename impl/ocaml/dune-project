@@ -1,0 +1,27 @@
+(lang dune 3.24)
+(name img_drv)
+(generate_opam_files true)
+
+(formatting
+ (enabled_for ocaml))
+
+(source
+ (github dannywillems/img-drv))
+
+(license MPL-2.0)
+(authors "Danny Willems")
+(maintainers "danny@badaas.be")
+
+(package
+ (name img_drv)
+ (synopsis "A portable, content-addressed IR for reproducible build descriptions")
+ (description
+  "Describe a build, compute its store paths, serialize it, and get bytes identical to what Nix emits. The OCaml implementation is the typed reference: variants for every sum, abstract types so invalid values are unconstructible.")
+ (depends
+  (ocaml
+   (>= 5.5.0))
+  (alcotest :with-test)))
+
+; The OCaml implementation is the TYPED REFERENCE. Variants for every sum,
+; abstract types in .mli files so invalid values are unconstructible, and
+; warnings as errors. See README.md for what that buys over the other three.

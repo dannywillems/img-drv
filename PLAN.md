@@ -20,10 +20,10 @@ How it is used:
 
 Ordered. The top item is the next thing to do.
 
-1. **OCaml**, the typed reference, with abstract types in `.mli` files. The
-   last of the four, and the only one left that could still surprise us: it is
-   the one language where the signature could be made unrepresentably wrong
-   rather than merely checked.
+1. **A Nix EXPRESSION front-end**, so a real nixpkgs package can be read and
+   not merely re-emitted. See the phase below; it is now the largest single
+   piece of work left, and the one that decides whether this project reads the
+   existing ecosystem or only writes alongside it.
 2. **Describe `scripts/probe.nix` in the eDSL** so `make differential` becomes
    a LIVE oracle for the eDSL rather than only for the parser. The ten golden
    examples already pin the eDSL against real Nix, but they are checked-in
@@ -78,6 +78,12 @@ Ordered. The top item is the next thing to do.
       expressiveness, and the tally is in `impl/go/README.md`.
 - [x] **`make conformance` across THREE implementations**: 10 intents, Python,
       Rust and Go, byte-identical to each other and to real Nix.
+- [x] **OCaml, the typed reference** (`impl/ocaml/`), and with it all four
+      implementations. Abstract validated names make one invariant
+      UNREPRESENTABLE rather than checked, visible as a missing error case.
+- [x] **`make conformance` across all FOUR implementations**: 10 intents,
+      Python, Rust, Go and OCaml, byte-identical to each other and to real Nix.
+      This is the phase 2 exit test.
 - [ ] `__structuredAttrs`, without which the eDSL cannot express a modern
       nixpkgs package.
 
@@ -162,12 +168,13 @@ this kind of claim can be.
 - [x] Go eDSL passing it, no `any` in the signature. The only `reflect` in the
       implementation is in its property-test generator, which stdlib
       `testing/quick` forces.
-- [ ] CI matrix covering all four pinned toolchains. Python, Rust and Go done.
+- [x] CI matrix covering all four pinned toolchains.
 - [x] Per-language docs, and the typing table recording which invariants each
       type system makes unrepresentable (`impl/rust/README.md`). The first
       result: a stronger type system removes the checks you make on values you
       CONSTRUCT, and none of the checks on values you COMPUTE.
 - [ ] The six real-world examples, in all four languages, byte-identical.
+      Blocked on `__structuredAttrs`.
 
 Go is the **falsification test**, not a fourth port. It has no sum types, no
 higher-kinded types, minimal generics. If the signature needs more than finite
@@ -288,36 +295,69 @@ Each example carries the equivalent Nix expression next to it, so the
 differential test covers it too. An example is not finished until it BUILDS
 through a real Nix store, not merely until it serialises.
 
-## Phase 4 (speculative): the Nix language as a front-end, and round trips
+## Phase 4: the Nix language as a front-end, and round trips
 
-Only once the IR exists in all four languages, and clearly after Phase 3. Noted
-now because it changes what the IR is FOR, and that is worth knowing early.
+Promoted from speculative. All four eDSLs exist and agree, so the IR is real;
+what it cannot yet do is READ the ecosystem it is compatible with.
 
-If the IR is genuinely the initial object, then the Nix language is just
-another presentation of it, and two things follow:
+The concrete case that motivated this: `cnijfilter_2_80`'s `default.nix` is a
+Nix EXPRESSION, and nothing here can parse it. Instantiating it with the pinned
+Nix and running all four implementations over the resulting closure gives
+1458 of 1458 round-tripped byte-identically and 2063 of 2063 output paths
+reproduced. So the gap is exactly and only the evaluator: we can read every
+derivation Nix produces, and no expression that produces one.
 
-- **A Nix front-end.** Parse the Nix language, evaluate it, emit our IR. OCaml
-  is the natural host: the grammar and the evaluator are exactly what ML was
-  designed for. This would let existing Nix code, including `flake.nix`, be
-  compiled to the IR and consumed by any of the four eDSLs.
+If the IR is genuinely the initial object, the Nix language is another
+presentation of it, and two things follow:
+
+- **A front-end.** Parse the Nix language, evaluate it, emit our IR. OCaml is
+  the natural host: the grammar and the evaluator are what ML was designed for,
+  and the typed reference already lives there.
 - **Round trips.** Lower the IR back into whichever surface a person prefers.
   From the theory this is not a separate feature: every backend is an algebra,
-  and a pretty-printer for language X is just the algebra whose carrier is
-  X's syntax. The uniqueness of the homomorphism out of the initial object is
-  what makes "IR to any language" well posed at all.
+  and a pretty-printer for language X is the algebra whose carrier is X's
+  syntax. The uniqueness of the homomorphism out of the initial object is what
+  makes "IR to any language" well posed at all.
+
+Ordered by what each step buys, so the work can stop at any point and still
+have delivered something:
+
+- [ ] **Lexer and parser for the Nix language**, to a typed AST. Menhir, per
+      AGENTS rule 1: this grammar is far past what recursive descent should be
+      hand-written for. Deliverable on its own: a formatter and a linter.
+- [ ] **Evaluator core**: laziness (thunks and blackholing), attribute sets,
+      functions with default and `@`-patterns, `let`/`with`/`rec`, string
+      interpolation, and the `builtins` a derivation actually reaches.
+- [ ] **String contexts.** The mechanism by which interpolating a derivation
+      into a string ADDS a dependency. This is what the eDSLs deliberately do
+      not have (the caller writes the edge by hand), so it is the first place
+      the front-end needs something the signature does not.
+- [ ] **`derivation` as a primop** emitting our IR, checked by the existing
+      conformance gate: for a given expression, our IR must equal what
+      `nix-instantiate` writes, byte for byte. The gate already exists; only
+      the input side is new.
+- [ ] **Enough of nixpkgs `lib` and `stdenv`** to evaluate one real package.
+      `cnijfilter_2_80` is the checked-in target because its closure is already
+      known to verify: 1458 derivations, 456 of them `__structuredAttrs`, and
+      fixed-output hashes in SRI, base-32, hex and `r:sha256`.
+- [ ] **IR to Nix**, and the round-trip law: IR to Nix to IR is the identity ON
+      THE QUOTIENT of `theory.md` section 4.
 
 Honest caveats, since this is the part most likely to be underestimated:
 
-- Emitting derivations is a fraction of what a Nix EVALUATOR does. Laziness,
+- Emitting derivations is a FRACTION of what a Nix evaluator does. Laziness,
   the fixed-point module system, `import`, string contexts and the whole of
   nixpkgs' `lib` are the real surface, and a partial evaluator that handles
   `flake.nix` but not nixpkgs is of limited use.
 - Round trips are only faithful up to the congruence in `theory.md` section 4.
-  IR to Nix to IR should be the identity ON THE QUOTIENT; expecting the
-  original TEXT back is a category error, and saying so up front avoids a
-  disappointment later.
-- Snix already has an evaluator. Reusing it may beat writing one, and that
-  comparison should be made before any parser is started.
+  Expecting the original TEXT back is a category error; saying so up front
+  avoids a disappointment later.
+- **Snix already has an evaluator.** Reusing it may beat writing one, and that
+  comparison should be made BEFORE any parser is started. Writing a Nix
+  evaluator because it is interesting is not the same as needing one.
+
+Exit test: `nix-instantiate` and our front-end produce byte-identical `.drv`
+files for the same expression, on a package with a real dependency graph.
 
 ## Phase 3 (conditional): the module system
 
@@ -411,6 +451,44 @@ Resolved, kept here only so the resolution is findable:
 ---
 
 ## Plan log
+
+- **2026-08-02** Verified against a real, awkward nixpkgs package rather than
+  our own examples: `cnijfilter_2_80`, a 32-bit unfree Canon printer driver.
+  Its `default.nix` is a Nix EXPRESSION and nothing here can parse it, which is
+  the honest limit; the closure it INSTANTIATES to verifies completely, in all
+  four languages: 1458 of 1458 round-tripped byte-identically and 2063 of 2063
+  output paths reproduced, 1458 of 1458 already canonical.
+
+  So the gap is exactly and only the evaluator, which is why Phase 4 is
+  promoted out of "speculative" and to the top of Now. That closure also widened
+  the corpus: 456 of its 1458 derivations use `__structuredAttrs`, and it
+  contains the first HEX-written fixed-output hash seen anywhere here (1 of
+  464), alongside SRI, base-32 and `r:sha256`. `system` is `i686-linux`, and it
+  declares `outputs = [ "out" ]` explicitly, which is the case a defaulted
+  model cannot express.
+
+- **2026-08-02** OCaml landed, and with it the phase 2 exit test: ten intents,
+  FOUR implementations, byte-identical to each other and to what real Nix
+  emitted. The portability claim is now as well supported as this kind of claim
+  can be.
+
+  OCaml is the far end of the typing axis, and exactly one row of the table
+  moves there. `Name.t` is abstract with a validating constructor, so an
+  invalid name is not a value that can exist, and `Edsl.error` has no
+  `Invalid_name` case where the other three do. The receipt for "unrepresentable
+  rather than checked" is the missing case.
+
+  What does NOT move, now checked across the whole axis rather than conjectured:
+  "outputs non-empty" and "the recorded paths match this derivation's own hash"
+  are runtime checks in all four. A type system distinguishes what you
+  CONSTRUCT; a verifier is still required for what you COMPUTE.
+
+  Third language-specific trap, completing a pattern with Rust's release-only
+  shift and Go's nil-slice conflation: a custom OCaml operator takes its
+  precedence from its FIRST CHARACTER, so `&%` sits below `^%` and the sha256
+  round parsed into the wrong tree with no warning. The FIPS 180-4 vectors
+  caught it on the first run, which is the argument for writing the vectors
+  before the code. See `docs/abstractions.md` entry 8.
 
 - **2026-08-02** Corrected `theory.md` section 6, which blamed the wrong thing.
   Priorities do NOT break the module system's algebra: keeping only the

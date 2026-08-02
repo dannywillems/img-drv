@@ -3,8 +3,7 @@
 A portable, content-addressed **intermediate representation for reproducible
 build descriptions**, with thin embedded DSLs in **Go, OCaml, Rust and Python**.
 
-Three of the four exist, and the falsification test has come back negative.
-See [Status](#status).
+All four exist, and they emit the same bytes. See [Status](#status).
 
 ## The thesis
 
@@ -94,26 +93,35 @@ docs/spec/              the IR signature and canonical serialization,
 impl/python/            the reference implementation, as a library
 impl/rust/              the second implementation, as a crate
 impl/go/                the falsification test, as a module
+impl/ocaml/             the typed reference, as an opam package
 ```
 
 ## Status
 
-Three of the four implementations exist, and the experiment runs. `make
-conformance` has the Python, Rust and Go eDSLs describe the same ten intents and
-diffs the bytes every way: against each other, and each against derivations real
-Nix emitted. Currently **10 intents, 3 implementations, byte-identical to Nix**,
-including each derivation's own `.drv` store path.
+**All four implementations exist, and they agree.** `make conformance` has the
+Python, Rust, Go and OCaml eDSLs describe the same ten intents and diffs the
+bytes every way: against each other, and each against derivations real Nix
+emitted. Currently **10 intents, 4 implementations, byte-identical to Nix**,
+including each derivation's own `.drv` store path. That is the Phase 2 exit
+test.
+
+Two results worth stating on their own.
 
 **The falsification test came back negative.** Go was the one most likely to
 refute the thesis, and the signature needed nothing beyond finite products
-there: four generic functions, all of the weak "identical body per type" kind,
-and nothing wanting a higher-kinded type or a type class. What Go costs is
-ENFORCEMENT and UNIFORMITY rather than expressiveness (a finite sum becomes a
-string type that accepts any string; `Option` acquires three different
-spellings), and the full tally is in
+there. What Go costs is ENFORCEMENT and UNIFORMITY, not expressiveness:
 [`impl/go/README.md`](impl/go/README.md).
 
-OCaml is the one left. See [`PLAN.md`](PLAN.md).
+**The typing axis has a floor.** Across all four languages, "the recorded paths
+match this derivation's own hash" is a runtime check, and always will be. A
+type system distinguishes what you CONSTRUCT; a verifier is still required for
+what you COMPUTE. OCaml moves exactly one row the others cannot
+([`impl/ocaml/README.md`](impl/ocaml/README.md)), and the last two rows move
+nowhere.
+
+Next is `__structuredAttrs`, the second env encoding that 1223 of 2516 real
+derivations use, without which the eDSL cannot express a modern nixpkgs
+package. See [`PLAN.md`](PLAN.md).
 
 ## Licence
 

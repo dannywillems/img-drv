@@ -75,6 +75,20 @@ jobs:
       - run: make go-test
       - run: make go-build
 
+  ocaml:
+    name: ocaml fmt, build and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # ocamlformat, dune build and alcotest, all in the pinned image. No
+      # setup-ocaml: the toolchain is the image, and dune plus alcotest are
+      # installed into a cache volume on first use.
+      - run: make ocaml-lint
+      - run: make ocaml-test
+      - run: make ocaml-build
+
   conformance:
     name: conformance across implementations
     runs-on: ubuntu-latest
