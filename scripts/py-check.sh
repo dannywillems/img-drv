@@ -28,7 +28,7 @@ esac
 exec docker run --rm \
   -v "$REPO:/w" -w /w/impl/python \
   "$PY_IMAGE" sh -c "
-    pip install -q --root-user-action=ignore -e . pytest hypothesis mypy ruff \
-      >/dev/null 2>&1
+    pip install -q --root-user-action=ignore -e '.[nix]' pytest hypothesis \
+      mypy ruff >/dev/null 2>&1
     $cmd
   "

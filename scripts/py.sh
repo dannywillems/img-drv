@@ -16,7 +16,16 @@ REPO="$(cd "$HERE/.." && pwd)"
 # shellcheck source=scripts/pins.env
 . "$HERE/pins.env"
 
+# The IR core needs nothing installed. The PARSER needs PLY, which unlike
+# menhir, LALRPOP and goyacc is a runtime dependency because it builds its
+# tables at import time, so it is installed only for the command that uses it.
+NEEDS_PLY=""
+if [ "${1:-}" = "parsecheck" ]; then
+  NEEDS_PLY="pip install --quiet --no-input --disable-pip-version-check --root-user-action=ignore ply &&"
+fi
+
 exec docker run --rm \
   -v "$REPO:/w" -w /w \
   -e PYTHONPATH=/w/impl/python/src \
-  "$PY_IMAGE" python -m img_drv "$@"
+  -e PYTHONDONTWRITEBYTECODE=1 \
+  "$PY_IMAGE" sh -c "$NEEDS_PLY exec python -m img_drv $*"

@@ -47,6 +47,8 @@ def _parts(parts: tuple[ast.Part, ...]) -> str:
 def _attr(a: ast.Attr) -> str:
     if isinstance(a, ast.Id):
         return a.name
+    if isinstance(a, ast.DynAttr):
+        return "${" + _expr(a.expr) + "}"
     if len(a.parts) == 1 and isinstance(a.parts[0], ast.Lit):
         return '"' + _escape(a.parts[0].text) + '"'
     return "${" + _parts(a.parts) + "}"
@@ -93,6 +95,18 @@ def _expr(e: ast.Expr) -> str:
             return '"' + _escape(e.text) + '"'
         case ast.Str() | ast.IndStr():
             return _parts(e.parts)
+        case ast.PathInterp():
+            # The leading path is absolute after parsing, so this emits an
+            # absolute interpolated path: valid Nix, and the same file.
+            out: list[str] = []
+            for part in e.parts:
+                if isinstance(part, ast.Lit):
+                    out.append(part.text)
+                elif isinstance(part.expr, ast.Path):
+                    out.append(part.expr.text)
+                else:
+                    out.append("${" + _expr(part.expr) + "}")
+            return "".join(out)
         case ast.Not():
             return f"(!{_expr(e.expr)})"
         case ast.Neg():

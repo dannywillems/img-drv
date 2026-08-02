@@ -6,6 +6,7 @@
     python -m img_drv drvpaths <dir>    recompute each .drv's own store path
     python -m img_drv examples <dir>    emit the conformance corpus
     python -m img_drv transpile <dir>   emit the same corpus as .nix source
+    python -m img_drv parsecheck <dir>  parse real .nix files, diff the tree
 
 All exit non-zero on any failure, which is what makes them usable as CI
 gates. `examples` is what `make conformance` drives: each implementation
@@ -121,11 +122,71 @@ def transpile(directory: pathlib.Path) -> int:
     return 0
 
 
+def parsecheck(directory: pathlib.Path) -> int:
+    """Differential-test the PARSER against real Nix, on real expressions.
+
+    `directory` holds pairs: `x.nix` is the source and `x.expected` is what the
+    pinned `nix-instantiate --parse` printed for it. We parse and print in the
+    same form; the two must match byte for byte, which pins tree SHAPE rather
+    than merely "it parsed".
+    """
+    # Deferred: PLY is an optional extra, so importing the parser at module
+    # level would make the IR commands fail when it is absent.
+    from .nix.parser import parse_and_print  # noqa: PLC0415
+
+    def read(p: pathlib.Path) -> str:
+        return p.read_text()
+
+    home_file = directory / "home"
+    home = home_file.read_text().strip() if home_file.exists() else ""
+    ok = bad = 0
+    for exp in sorted(directory.glob("*.expected")):
+        base = exp.with_suffix("")
+        path_file = base.with_suffix(".path")
+        origin = (
+            path_file.read_text().strip()
+            if path_file.exists()
+            else str(base.name)
+        )
+        want = read(exp).strip()
+        try:
+            got = parse_and_print(
+                read(base.with_suffix(".nix")),
+                base=str(pathlib.PurePosixPath(origin).parent),
+                home=home,
+            ).strip()
+        except (SyntaxError, RecursionError) as e:
+            bad += 1
+            if bad <= 5:
+                print(f"PARSE FAILED {origin}: {e}")
+            continue
+        if got == want:
+            ok += 1
+            continue
+        bad += 1
+        if bad <= 5:
+            pairs = zip(want, got, strict=False)
+            d = next(
+                (i for i, (a, b) in enumerate(pairs) if a != b),
+                min(len(want), len(got)),
+            )
+            lo = max(0, d - 30)
+            print(f"MISMATCH {origin} (at offset {d})")
+            print(f"  want ...{want[lo : lo + 90]}...")
+            print(f"  got  ...{got[lo : lo + 90]}...")
+    total = ok + bad
+    print(
+        f"{ok}/{total} real nixpkgs expressions parse to the same tree as Nix"
+    )
+    return 1 if bad else 0
+
+
 COMMANDS = {
     "verify": verify,
     "roundtrip": roundtrip,
     "canonical": canonical_check,
     "transpile": transpile,
+    "parsecheck": parsecheck,
     "drvpaths": drvpaths,
     "examples": examples,
 }

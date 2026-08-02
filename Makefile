@@ -119,7 +119,7 @@ corpus: ## Pull N random nixpkgs packages and verify against them (needs docker)
 
 .PHONY: nixpkgs-parse
 nixpkgs-parse: ## Parse N random real nixpkgs files, diff the tree vs Nix
-	./scripts/nixpkgs-parse.sh $(N)
+	./scripts/nixpkgs-parse.sh $(N) $(IMPLS)
 
 .PHONY: lint-shell
 lint-shell: ## Lint shell scripts

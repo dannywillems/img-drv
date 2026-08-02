@@ -39,6 +39,7 @@ __all__ = [
     "Op",
     "Operator",
     "Path",
+    "PathInterp",
     "Pset",
     "Pvar",
     "SearchPath",
@@ -118,6 +119,19 @@ class Path:
 
 
 @dataclass(frozen=True, slots=True)
+class PathInterp:
+    """A path containing an interpolation, ``./x/${v}.nix``.
+
+    NOT a string: Nix models it as a concatenation whose first element is a
+    path, and prints it as ``(/abs/x/ + v + ".nix")``. The parts use the same
+    Lit/Anti shape as a string's, with the leading path carried as an
+    ``Anti(Path(...))`` so it prints bare.
+    """
+
+    parts: tuple[Part, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class SearchPath:
     """``<nixpkgs>``"""
 
@@ -145,15 +159,26 @@ class Id:
 
 @dataclass(frozen=True, slots=True)
 class StrAttr:
-    """An attribute named by a string or an interpolation.
-
-    ``."a"`` or ``.${e}``.
-    """
+    """An attribute named by a STRING literal, ``."a"``."""
 
     parts: tuple[Part, ...]
 
 
-Attr: TypeAlias = Id | StrAttr
+@dataclass(frozen=True, slots=True)
+class DynAttr:
+    """An attribute named by an expression DIRECTLY, ``.${e}``.
+
+    Distinct from ``StrAttr`` holding one antiquotation, which is ``."${e}"``,
+    because Nix keeps them distinct and prints them differently: ``a.${k}``
+    prints as ``(a)."${k}"`` while ``{ "${k}" = 1; }`` prints as
+    ``{ "${(k)}" = 1; }``. The parentheses are the string wrapper showing
+    through.
+    """
+
+    expr: Expr
+
+
+Attr: TypeAlias = Id | StrAttr | DynAttr
 AttrPath: TypeAlias = tuple[Attr, ...]
 
 
@@ -287,6 +312,7 @@ Expr: TypeAlias = (
     | Str
     | IndStr
     | Path
+    | PathInterp
     | SearchPath
     | Uri
     | Var
@@ -304,3 +330,60 @@ Expr: TypeAlias = (
     | Not
     | Neg
 )
+
+
+# Path resolution, which Nix performs at PARSE time.
+#
+# A relative path resolves against the directory of the file it is written in,
+# and a leading `~` against HOME, so `./common/x11.nix` in `nixos/tests/foo.nix`
+# is an absolute path in the tree and `nix-instantiate --parse` prints it that
+# way. A parser that keeps the relative text produces a different tree.
+#
+# Module state rather than a parameter because the parser is generated and its
+# entry point takes only a lexer. Empty means "leave paths alone", which is what
+# the transpiler and the unit vectors want.
+
+base_dir = ""
+home_dir = ""
+
+
+def set_context(base: str = "", home: str = "") -> None:
+    """Set the directories path literals resolve against."""
+    global base_dir, home_dir
+    base_dir, home_dir = base, home
+
+
+def canonicalise(p: str) -> str:
+    """Fold away ``.`` and ``..``, collapse separators, drop a trailing one."""
+    stack: list[str] = []
+    for part in p.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if stack:
+                stack.pop()
+        else:
+            stack.append(part)
+    return "/" + "/".join(stack)
+
+
+def resolve_path(p: str) -> str:
+    """Resolve a path literal against the base or home directory."""
+    if p.startswith("~"):
+        return canonicalise(home_dir + p[1:]) if home_dir else p
+    if not base_dir:
+        return p
+    if p.startswith("/"):
+        return canonicalise(p)
+    return canonicalise(base_dir + "/" + p)
+
+
+def resolve_path_prefix(p: str) -> str:
+    """Resolve the literal PREFIX of an interpolated path.
+
+    Same as :func:`resolve_path` except a trailing separator is KEPT, because
+    it is meaningful here: ``./x/${v}`` denotes ``/abs/x/`` concatenated with
+    ``v``, and dropping the separator would glue the segments together.
+    """
+    resolved = resolve_path(p)
+    return resolved + "/" if p.endswith("/") else resolved

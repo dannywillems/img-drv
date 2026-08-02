@@ -30,11 +30,26 @@
 # constructions a fixed list would never contain. That is the same design as
 # scripts/fetch-corpus.sh, for the same reason.
 #
-# Usage: ./scripts/nixpkgs-parse.sh [count]     (default 300)
+# Usage: ./scripts/nixpkgs-parse.sh [count] [impl ...]   (default 300, ocaml python)
 
 set -euo pipefail
 
 COUNT="${1:-300}"
+shift || true
+if [ "$#" -eq 0 ]; then
+  set -- ocaml python
+fi
+
+# A case rather than an associative array: macOS ships bash 3.2.
+runner_for() {
+  case "$1" in
+    ocaml) echo ml.sh ;;
+    python) echo py.sh ;;
+    rust) echo rs.sh ;;
+    go) echo go.sh ;;
+    *) echo "unknown implementation: $1" >&2; exit 2 ;;
+  esac
+}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 REL="${NIXPKGS_PARSE_DIR:-build/nixpkgs-parse}"
@@ -91,5 +106,9 @@ if [ "$n" -eq 0 ]; then
   exit 1
 fi
 
-echo ">> parsing each with our parser and comparing the printed tree"
-"$HERE/ml.sh" parsecheck "$REL"
+fail=0
+for impl in "$@"; do
+  echo ">> $impl parses each and compares the printed tree"
+  "$HERE/$(runner_for "$impl")" parsecheck "$REL" || fail=1
+done
+[ "$fail" -eq 0 ]

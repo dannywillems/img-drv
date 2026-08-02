@@ -24,6 +24,17 @@ classifiers = [
 requires-python = ">=3.11"
 dependencies = []
 
+# The IR core has NO runtime dependencies and must keep none: someone embedding
+# img-drv to emit derivations should not inherit a parser generator. The Nix
+# EXPRESSION layer needs one, so it is an extra.
+#
+# Note a real difference from the other three languages: menhir, LALRPOP and
+# goyacc all generate source at BUILD time and vanish from the shipped
+# artifact. PLY builds its LALR tables at IMPORT time, so it is a genuine
+# RUNTIME dependency. That is the cost of Python having no build step.
+[project.optional-dependencies]
+nix = ["ply>=3.11"]
+
 [project.urls]
 Homepage = "https://github.com/dannywillems/img-drv"
 Repository = "https://github.com/dannywillems/img-drv"
@@ -33,7 +44,7 @@ Issues = "https://github.com/dannywillems/img-drv/issues"
 img-drv = "img_drv.cli:main"
 
 [dependency-groups]
-dev = ["pytest", "pytest-cov", "hypothesis", "mypy", "ruff"]
+dev = ["pytest", "pytest-cov", "hypothesis", "mypy", "ruff", "ply>=3.11"]
 
 # Explicit include lists, never excludes: a new top-level file must be added
 # deliberately rather than shipped by accident.
@@ -62,6 +73,10 @@ select = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# PLY dictates its own naming: a token rule MUST be `t_TOKENNAME` and a
+# grammar rule `p_name`, so the pep8-naming checks cannot apply to the two
+# files that define them. Scoped to those files, never to the family.
+"src/img_drv/nix/lexer.py" = ["N802", "N816"]
 "tests/**" = ["S101", "ARG001", "ARG002", "PLW"]
 
 [tool.ruff.format]
