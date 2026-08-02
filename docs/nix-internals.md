@@ -196,6 +196,51 @@ makes nixpkgs possible at all, since evaluating one attribute of a set of
 system's fixed point works and why a cycle reports "infinite recursion
 encountered" rather than being caught statically.
 
+### `nix-instantiate --parse` is a differential oracle for a parser
+
+It re-prints the parsed AST, so it pins tree SHAPE rather than merely "it
+parsed". Every row below was produced by the pinned Nix, and together they
+specify the printer a front-end has to match.
+
+| input | `--parse` output | what it pins |
+| --- | --- | --- |
+| `1 + 2 * 3` | `(1 + (__mul 2 3))` | precedence, and that `*` DESUGARS |
+| `!a + b` | `(! (a + b))` | `!` really does bind looser than `+` |
+| `a // b == c` | `((a // b) == c)` | `//` binds tighter than `==` |
+| `a ++ b ++ c` | `(a ++ (b ++ c))` | `++` is right associative |
+| `a -> b -> c` | `(a -> (b -> c))` | `->` is right associative |
+| `-a` | `(__sub 0 a)` | unary minus desugars |
+| `a - -a` | `(__sub a (__sub 0 a))` | binary `-` desugars too, though `+` does not |
+| `"a${toString b}c"` | `("a" + (toString b) + "c")` | interpolation is a `+` chain |
+| `a.b.${"c"}` | `(a).b.c` | a constant dynamic attribute is folded |
+| `a.b.c or d` | `(a).b.c or (d)` | select parenthesises its operand |
+| `[ a (a) ]` | `[ (a) (a) ]` | list elements are always parenthesised |
+
+Two things to know before relying on it:
+
+- it performs **static scope resolution** and fails with "undefined variable"
+  on a free variable, so a probe has to bind everything it mentions;
+- it prints a **desugared** tree, so a front-end matching it has to reproduce
+  the desugaring (`*` to `__mul`, `/` to `__div`, `-` to `__sub`, unary minus
+  to `__sub 0`, interpolation to `+`), not merely the parse.
+
+### One lexer trap worth knowing before writing a lexer
+
+```
+let f = x:x; in f 1 2   =>   (let f = "x:x"; in (f 1 2))
+```
+
+`x:x` is not a lambda. It lexes as a **URI**, because Nix has a URI token
+(`scheme:path` with no whitespace) and it wins against `ID ':' expr`. Writing
+`x: x` with the space gives the lambda. A hand-written lexer that tokenises
+identifiers and `:` separately will silently disagree with Nix here, and the
+disagreement is invisible until something evaluates the string as a function.
+
+This is the strongest single argument for generating the lexer from the same
+kind of maximal-munch rules Nix's own Flex file uses, rather than hand-rolling
+one, and it is why `docs/decisions/2026-08-02-nix-frontend-build-not-reuse.md`
+settles on the standard tools per language.
+
 ### What this means for a front-end
 
 The grammar is small and a parser is a weekend. The evaluator is not, and the
