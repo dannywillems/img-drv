@@ -57,6 +57,154 @@ all four languages).
 Closing that gap means writing an evaluator, which is `PLAN.md` phase 4 and is
 deliberately the largest remaining item.
 
+## What exactly is a Nix expression
+
+**First, a correction to the obvious question: there are no type inference
+rules, because Nix has no static type system.** It is dynamically typed, in the
+same sense as Python or Scheme. Nothing is checked before evaluation, there are
+no type annotations, no inference, no principal types, and no way to declare a
+type of your own. An expression is checked by running it, and a type error is a
+runtime error that only surfaces on a code path you actually took. That is the
+single most important fact about the language for anyone building a front-end,
+and it is why a partial evaluator cannot lean on types to tell it what it has.
+
+What DOES exist is a grammar, a fixed set of runtime value tags, and a
+call-by-need evaluation order.
+
+Everything below is read out of the Nix source at commit
+[`a86a3638`](https://github.com/NixOS/nix/tree/a86a363831d4eab7ad5c1d62a6bdc0380c94bd63),
+not recalled. Line numbers are against that commit; re-verify and move the pin
+together.
+
+### The grammar
+
+`src/libexpr/parser.y` is a Bison grammar, layered by precedence. The
+nonterminals, outermost first:
+
+```
+expr            -> expr_function
+expr_function   -> ID ':' expr_function                  -- lambda
+                 | formal_set ':' expr_function          -- { a, b ? e, ... }:
+                 | formal_set '@' ID ':' expr_function   -- {...}@args:
+                 | ID '@' formal_set ':' expr_function   -- args@{...}:
+                 | ASSERT expr ';' expr_function
+                 | WITH expr ';' expr_function
+                 | LET binds IN expr_function
+                 | expr_if
+expr_if         -> IF expr THEN expr ELSE expr
+                 | expr_pipe_from | expr_pipe_into | expr_op
+expr_op         -> the operator table below
+expr_app        -> expr_app expr_select | expr_select     -- application, left assoc
+expr_select     -> expr_simple '.' attrpath [OR_KW expr_select]
+expr_simple     -> ID | INT | FLOAT | '"' string_parts '"'
+                 | IND_STRING_OPEN ind_string_parts       -- '' ... ''
+                 | path | SPATH | URI | '(' expr ')'
+                 | LET '{' binds '}'                      -- deprecated
+                 | REC '{' binds '}' | '{' binds '}' | '[' list ']'
+```
+
+Note what is NOT there: no pattern matching (attribute-set destructuring in a
+lambda argument is the only thing resembling it), no type declarations, no
+modules or namespaces, no user-defined operators, and no loops. Recursion and
+`builtins.foldl'` do all the work.
+
+`expr_function` being the top of the tree is why `x: y: z` parses as
+`x: (y: z)` and why `a: b == c` is `a: (b == c)`: a lambda body extends as far
+right as it can.
+
+### Operator precedence, which has two real oddities
+
+From `parser.y:208-219`, lowest binding to highest:
+
+| level | operators | associativity |
+| --- | --- | --- |
+| 1 | `->` | right |
+| 2 | `\|\|` | left |
+| 3 | `&&` | left |
+| 4 | `==` `!=` | non-assoc |
+| 5 | `<` `>` `<=` `>=` | non-assoc |
+| 6 | `//` | right |
+| 7 | `!` | left |
+| 8 | `+` `-` | left |
+| 9 | `*` `/` | left |
+| 10 | `++` | right |
+| 11 | `?` | non-assoc |
+| 12 | unary `-` | non-assoc |
+
+Two things here surprise almost everyone:
+
+- **`!` binds LOOSER than arithmetic**, sitting between `//` and `+`. So
+  `!a + b` is `!(a + b)`, not `(!a) + b`. In C-family languages unary `not` is
+  near the top.
+- **`//` (attribute-set update) binds tighter than the comparisons**, so
+  `a // b == c` is `(a // b) == c`.
+
+`==` and `<` are non-associative, so `a == b == c` is a syntax error rather
+than a silent mis-parse, which is the right choice.
+
+### The types, such as they are
+
+There is no type LANGUAGE, only a tag on every runtime value. From
+`src/libexpr/include/nix/expr/value.hh:75`, the `ValueType` enum is:
+
+```
+nInt  nFloat  nBool  nString  nPath  nNull  nAttrs  nList  nFunction
+```
+
+plus three that are not user-visible: `nThunk` (unevaluated), `nFailed`, and
+`nExternal` (plugin values). `builtins.typeOf` maps them to the nine strings
+`"int" "float" "bool" "string" "path" "null" "set" "list" "lambda"`.
+
+That is the whole type universe. Consequences worth stating plainly:
+
+- **No sum types, no records with fixed fields, no parametric polymorphism.**
+  An attribute set is the only compound structure, and it is heterogeneous and
+  open.
+- **Strings carry a hidden component**: a *string context*, the set of store
+  paths that must be built before the string is meaningful. This is invisible
+  to `typeOf` and is what makes `"${pkgs.hello}/bin/hello"` add a dependency.
+  It is data smuggled inside a value tag, and it is the one part of the value
+  model with no analogue in this project's IR.
+- **Paths are a distinct type from strings**, which is why `./foo` and
+  `"./foo"` behave differently and why copying a path to the store is
+  implicit.
+- **Integers are 64-bit and overflow is checked**, floats are doubles, and the
+  two do not unify: `1 + 1.0` works by coercion in the primop, not by a typing
+  rule.
+
+### What people mean when they say "types" in Nix
+
+Two different things, neither of which is a language type system:
+
+1. **`builtins.typeOf` and friends** (`isAttrs`, `isFunction`, ...): runtime
+   tag inspection. Every primop that needs an argument of a given shape checks
+   it itself and throws on mismatch.
+2. **`lib.types` in nixpkgs**: the MODULE SYSTEM's option types. These are
+   ordinary values, records of a `check` predicate and a `merge` function, used
+   by `lib.evalModules` at runtime to validate and combine option definitions.
+   They are a library, not a checker, and they are what `theory.md` section 6
+   is about. `types.int` cannot make an ill-typed expression fail to parse; it
+   makes a bad option definition fail to evaluate, with a better message.
+
+### Evaluation order
+
+Call-by-need. Every expression becomes a thunk, forced at most once, with the
+result written back in place. `nThunk` in the value enum is that machinery
+leaking into the type tag. Laziness is not an optimisation here: it is what
+makes nixpkgs possible at all, since evaluating one attribute of a set of
+100000 packages must not evaluate the other 99999. It is also why the module
+system's fixed point works and why a cycle reports "infinite recursion
+encountered" rather than being caught statically.
+
+### What this means for a front-end
+
+The grammar is small and a parser is a weekend. The evaluator is not, and the
+absence of types is precisely why: nothing can be resolved ahead of time, so a
+front-end has to implement laziness, string contexts, and enough of `lib` and
+`stdenv` to reach a `derivation` call. `PLAN.md` phase 4 sizes that honestly,
+and notes that Snix already has an evaluator worth comparing against before
+writing another.
+
 ## Derivations: the IR
 
 A **store derivation** is the reified build description. It is stored on disk in
