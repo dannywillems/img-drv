@@ -21,6 +21,10 @@ REPO="$(cd "$HERE/.." && pwd)"
 # shellcheck source=scripts/pins.env
 . "$HERE/pins.env"
 
+# The install line is not redundant with ml-check.sh. The opam cache volume is
+# warm on a laptop and cold on a fresh CI runner, and this script has to work on
+# both: without it, conformance fails with "dune: not found" only in CI, which
+# is the worst place to find out.
 exec docker run --rm \
   -v "$REPO:/w" -w /w/impl/ocaml \
   -v img-drv-opam:/home/opam/.opam \
@@ -28,6 +32,7 @@ exec docker run --rm \
   -e OPAMROOT=/home/opam/.opam \
   "$ML_IMAGE" sh -c "
     eval \$(opam env --root=/home/opam/.opam) &&
-    dune exec --no-build-info -- img-drv $1 /w/$2 2>/dev/null ||
-    dune exec -- ./bin/main.exe $1 /w/$2
+    opam install -y --no-depexts dune alcotest >/dev/null 2>&1 || true
+    eval \$(opam env --root=/home/opam/.opam) &&
+    dune exec --no-build-info -- ./bin/main.exe $1 /w/$2
   "
