@@ -100,11 +100,11 @@ The compensation is a `Valid()` method and a check on every construction path.
 Go has no `Option`, and the three optional things in this API each ended up
 encoded differently:
 
-| what | encoding | why not the others |
-| --- | --- | --- |
-| `Outputs` (declared or not) | struct with a `Declared bool` | see below; the obvious encoding is unsafe |
-| `Build.FixedOutput` | `*FixedOutput`, nil for none | a pointer is the idiom for an optional struct |
-| `FixedOutput.Mode` | `""` zero value means `Flat` | a zero value that means the default is idiomatic and convenient |
+| what                        | encoding                      | why not the others                                              |
+| --------------------------- | ----------------------------- | --------------------------------------------------------------- |
+| `Outputs` (declared or not) | struct with a `Declared bool` | see below; the obvious encoding is unsafe                       |
+| `Build.FixedOutput`         | `*FixedOutput`, nil for none  | a pointer is the idiom for an optional struct                   |
+| `FixedOutput.Mode`          | `""` zero value means `Flat`  | a zero value that means the default is idiomatic and convenient |
 
 In Python and Rust all three are one type. Go does not stop you saying any of
 it; it stops you saying it the **same way** twice.
@@ -173,17 +173,30 @@ a seven-case RECURSIVE sum. This is the sharpest cost in this file, because
 unlike everything above it is not about how an invariant is checked but about
 whether the type can be spelled at all.
 
-| language | encoding | cost |
-| --- | --- | --- |
-| OCaml, Rust | a 7-case variant / `enum` | 7 lines, exhaustive matching |
-| Python | a recursive `TypeAlias` | 1 alias |
-| **Go** | struct + `Kind` discriminant + 7 fields + 7 constructors | ~40 lines |
+| language    | encoding                                                      | cost                         |
+| ----------- | ------------------------------------------------------------- | ---------------------------- |
+| OCaml, Rust | a 7-case variant / `enum`                                     | 7 lines, exhaustive matching |
+| Python      | a recursive `TypeAlias`                                       | 1 alias                      |
+| **Go**      | sealed interface: 7 types + 7 marker methods + 7 constructors | ~45 lines                    |
 
-And the difference is not only length. `JSONValue{}` is a **representable value
-of an invalid shape**: `Kind` and the payload fields can disagree, and only a
-runtime convention keeps them in step. A variant makes that unrepresentable.
-The earlier two-case sums (`HashAlgo`, `Outputs`) were small enough that the
-encoding papered over it; a recursive seven-case sum is not.
+And the difference is not only length, though it is no longer the difference
+this file first claimed.
+
+The original encoding was a struct with a `Kind` discriminant and one field per
+case, in which `JSONValue{}` was a **representable value of an invalid shape**:
+`Kind` and the payload could disagree and only a runtime convention kept them
+in step. That has been fixed
+([decision](../../docs/decisions/2026-08-02-go-json-sealed-interface.md)), and
+the fix is the interesting part: part of what this file charged to GO was
+really the cost of the ENCODING WE PICKED. Go has two ways to write a sum and
+we had chosen the worse one, which only became obvious after writing a
+21-case sum (`nix/ast.go`) where the struct form is not writable at all.
+
+What remains is the honest gap, and it is two things rather than three: Go
+cannot check that a type switch over the seven is EXHAUSTIVE, and the interface
+has a `nil` inhabitant that is no case at all. Every such switch therefore ends
+in a panicking `default`, which turns a silent wrong answer into a loud one and
+cannot prevent it.
 
 Note carefully what this is NOT: it is not inexpressible, the JSON round-trips,
 and the bytes match all three other implementations. It is the same verdict as
@@ -225,10 +238,10 @@ Non-blank lines of library source, all three heavily commented, so treat this as
 an order-of-magnitude comparison rather than a benchmark.
 
 | implementation | non-blank lines |
-| --- | --- |
-| Python | 1305 |
-| Rust | 1881 |
-| Go | 2594 |
+| -------------- | --------------- |
+| Python         | 1305            |
+| Rust           | 1881            |
+| Go             | 2594            |
 
 Roughly **2x** Python for the same behaviour. Items 4, 5 and 7 above account for
 most of the difference, and none of them is about the signature.
@@ -238,19 +251,19 @@ most of the difference, and none of them is about the signature.
 Which invariants each type system makes UNREPRESENTABLE, and which stay runtime
 checks. This is one of the real outputs of the project.
 
-| invariant | Python | Rust | Go |
-| --- | --- | --- | --- |
-| store path vs digest vs output name not confused | `NewType`, erased; mypy only | distinct types | defined types |
-| hash algorithm is one of four | `Literal`, erased; runtime check | `enum` | **defined string; runtime check** |
-| ingestion mode is flat or recursive | `Literal`, erased | `enum` | **defined string; runtime check** |
-| `outputs` is an Option, not a defaulted list | `Sequence \| None` | `Option<Vec<_>>` | **struct with a discriminant** |
-| env keys are unique | free (`Mapping`) | free (`BTreeMap`) | free (`map`) |
-| env insertion order not observable | property test | free (`BTreeMap`) | free, and enforced by randomised iteration |
-| structural equality | free (`@dataclass`) | free (`derive`) | **hand-written per type** |
-| exhaustiveness over failure cases | n/a | `match` on an enum | **sentinel errors, no check** |
-| a recursive 7-case sum (a JSON value) | recursive `TypeAlias`, erased | 7-variant `enum` | **struct + discriminant + 7 fields; an invalid shape is representable** |
-| outputs non-empty, names valid, one fixed output | runtime | runtime | runtime |
-| recorded paths match the derivation's own hash | runtime | runtime | runtime |
+| invariant                                        | Python                           | Rust               | Go                                                                         |
+| ------------------------------------------------ | -------------------------------- | ------------------ | -------------------------------------------------------------------------- |
+| store path vs digest vs output name not confused | `NewType`, erased; mypy only     | distinct types     | defined types                                                              |
+| hash algorithm is one of four                    | `Literal`, erased; runtime check | `enum`             | **defined string; runtime check**                                          |
+| ingestion mode is flat or recursive              | `Literal`, erased                | `enum`             | **defined string; runtime check**                                          |
+| `outputs` is an Option, not a defaulted list     | `Sequence \| None`               | `Option<Vec<_>>`   | **struct with a discriminant**                                             |
+| env keys are unique                              | free (`Mapping`)                 | free (`BTreeMap`)  | free (`map`)                                                               |
+| env insertion order not observable               | property test                    | free (`BTreeMap`)  | free, and enforced by randomised iteration                                 |
+| structural equality                              | free (`@dataclass`)              | free (`derive`)    | **hand-written per type**                                                  |
+| exhaustiveness over failure cases                | n/a                              | `match` on an enum | **sentinel errors, no check**                                              |
+| a recursive 7-case sum (a JSON value)            | recursive `TypeAlias`, erased    | 7-variant `enum`   | **sealed interface; no invalid shape, but no exhaustiveness check either** |
+| outputs non-empty, names valid, one fixed output | runtime                          | runtime            | runtime                                                                    |
+| recorded paths match the derivation's own hash   | runtime                          | runtime            | runtime                                                                    |
 
 The pattern, now visible across three languages: **a stronger type system
 removes checks on values you CONSTRUCT, and none of the checks on values you

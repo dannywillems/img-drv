@@ -20,21 +20,15 @@ How it is used:
 
 Ordered. The top item is the next thing to do.
 
-1. **Decide the `JSONValue` encoding in Go.** `docs/abstractions.md` entry 12
-   found that the sealed interface used by `impl/go/nix/` is strictly better
-   than the discriminant struct used by `impl/go/json.go`, and was available
-   there too. Changing it is a BREAKING change to the Go library's public API
-   for a type verified across 2063 output paths, so it needs a decision, not a
-   drive-by cleanup.
-2. **The EVALUATOR**, so a real nixpkgs package can be READ and not merely
+1. **The EVALUATOR**, so a real nixpkgs package can be READ and not merely
    re-emitted. Parsing is the easy half and is nearly done; the evaluator has
    no `derivation` primop yet, and without one no parsed package can become
    IR. This is where `import`, laziness and string contexts arrive.
-3. **Describe `scripts/probe.nix` in the eDSL** so `make differential` becomes
+2. **Describe `scripts/probe.nix` in the eDSL** so `make differential` becomes
    a LIVE oracle for the eDSL rather than only for the parser. The ten golden
    examples already pin the eDSL against real Nix, but they are checked-in
    files; the probe runs against a real `nix-instantiate` on every push.
-4. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
+3. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
    format (`docs/spec/canonical.md` section 3). Now also the one gap in the
    `.drv` path rule: no derivation we produce has a non-empty `inputSrcs`, so
    that half of the references set is verified only by reading real files.
@@ -69,6 +63,10 @@ Ordered. The top item is the next thing to do.
       than a printer bug; writing those eight down as a specification is what
       made the other three pass first time. See `docs/abstractions.md` entries
       13 and 14.
+- [x] **Go's sum encoding decided and converted.** `impl/go/json.go` uses a
+      sealed interface, like `impl/go/nix/`; verified byte-neutral, which is
+      the only acceptable outcome for a type that decides store paths.
+      `docs/decisions/2026-08-02-go-json-sealed-interface.md`.
 - [x] **The SURFACE is tested against a real package.** `make worked-example`:
       one package using `stdenv.mkDerivation`, a nixpkgs dependency, an overlay
       and a fixed point, built through each language's `surface` and required
@@ -516,6 +514,12 @@ Resolved, kept here only so the resolution is findable:
 ---
 
 ## Plan log
+
+- **2026-08-02** Converted Go's JSON sum from a discriminant struct to a sealed
+  interface. It had been held back as needing a decision, and the reason did not
+  survive checking: the Go module has no tags and has never been released, so
+  there was no published API to break. The finding it settles is that part of
+  what entry 9 charged to GO was the cost of the encoding WE picked.
 
 - **2026-08-02** A worked example that is not a conformance intent: a real
   package through `surface` in all four languages, compared against

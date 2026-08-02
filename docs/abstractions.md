@@ -605,15 +605,20 @@ cannot prevent it.
 **Why the bigger type was needed to see this.** At 7 cases both encodings are
 writable and the discriminant struct looks like the more explicit one. At 21
 only one is writable at all, and having written it, the comparison at 7 becomes
-obvious. That is the general reason to keep pushing a signature until something
+obvious. The general shape is worth keeping: a design that is merely AWKWARD at
+small N is often WRONG at small N too, and building the bigger instance settles
+it faster than arguing about the smaller one. That is the general reason to keep pushing a signature until something
 breaks: `theory.md` section 1 restricted the IR to finite products precisely so
 Go would not be strained, and every subsequent widening (a recursive sum in
 entry 9, a second-order theory here) has paid for itself in what it revealed.
 
-**Left undone deliberately.** `impl/go/json.go` still uses the discriminant
-struct. Changing it is a breaking change to the Go library's public API for a
-type verified across 2063 output paths, so it is a decision to take
-explicitly rather than a cleanup to slip into a port. Recorded in `PLAN.md`.
+**Now done.** `impl/go/json.go` uses the sealed interface too, recorded in
+`docs/decisions/2026-08-02-go-json-sealed-interface.md`. The reason it looked
+like it needed a decision turned out not to survive contact: the Go module has
+no tags and has never been released, so there was no published API to break.
+Verified byte-neutral, which is the only acceptable outcome for a type that
+decides store paths: conformance unchanged, 2063 of 2063 output paths and 1458
+of 1458 round-trips unchanged.
 
 **A second, smaller measurement from the same port.** The fresh-name supply is
 ambient package state in OCaml, Python and Go, and cannot be in Rust: a mutable

@@ -555,7 +555,7 @@ func Derive(b Build) (Drv, error) {
 	if !b.StructuredAttrs {
 		untyped := []string{}
 		for k, v := range b.Env {
-			if !v.IsString() {
+			if _, ok := AsString(v); !ok {
 				untyped = append(untyped, k)
 			}
 		}
@@ -600,10 +600,12 @@ func Derive(b Build) (Drv, error) {
 				attrs[k] = Str(v)
 			}
 		}
-		env["__json"] = Object(attrs).JSON()
+		env["__json"] = JSON(Object(attrs))
 	} else {
 		for k, v := range b.Env {
-			env[k] = v.Str
+			// Checked above: without StructuredAttrs every value is a string.
+			text, _ := AsString(v)
+			env[k] = text
 		}
 		env["name"] = b.Name
 		env["system"] = b.System
