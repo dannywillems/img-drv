@@ -34,5 +34,5 @@ exec docker run --rm \
     eval \$(opam env --root=/home/opam/.opam) &&
     opam install -y --no-depexts dune alcotest >/dev/null 2>&1 || true
     eval \$(opam env --root=/home/opam/.opam) &&
-    dune exec --no-build-info -- ./bin/main.exe $1 /w/$2
+    dune exec --no-print-directory -- ./bin/main.exe $1 /w/$2
   "
