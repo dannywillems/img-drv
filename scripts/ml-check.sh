@@ -42,6 +42,6 @@ exec docker run --rm \
   -e IMG_DRV_NIX_VECTORS=/w/docs/spec/nix-parse/vectors.tsv \
   "$ML_IMAGE" sh -c "
     eval \$(opam env --root=/home/opam/.opam) &&
-    opam install -y --no-depexts dune menhir alcotest ocamlformat.0.29.0 >/dev/null 2>&1 || true
+    opam install -y --no-depexts $ML_PACKAGES >/dev/null 2>&1 || true
     eval \$(opam env --root=/home/opam/.opam) && $cmd
   "

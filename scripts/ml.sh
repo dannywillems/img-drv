@@ -25,6 +25,9 @@ REPO="$(cd "$HERE/.." && pwd)"
 # warm on a laptop and cold on a fresh CI runner, and this script has to work on
 # both: without it, conformance fails with "dune: not found" only in CI, which
 # is the worst place to find out.
+#
+# The package list lives in pins.env because it was duplicated here and drifted
+# behind ml-check.sh; see ML_PACKAGES there.
 exec docker run --rm \
   -v "$REPO:/w" -w /w/impl/ocaml \
   -v img-drv-opam:/home/opam/.opam \
@@ -32,7 +35,7 @@ exec docker run --rm \
   -e OPAMROOT=/home/opam/.opam \
   "$ML_IMAGE" sh -c "
     eval \$(opam env --root=/home/opam/.opam) &&
-    opam install -y --no-depexts dune alcotest >/dev/null 2>&1 || true
+    opam install -y --no-depexts $ML_PACKAGES >/dev/null 2>&1 || true
     eval \$(opam env --root=/home/opam/.opam) &&
     dune exec --no-print-directory -- ./bin/main.exe $1 /w/$2
   "
