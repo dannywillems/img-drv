@@ -28,12 +28,21 @@ REPO="$(cd "$HERE/.." && pwd)"
 #
 # The package list lives in pins.env because it was duplicated here and drifted
 # behind ml-check.sh; see ML_PACKAGES there.
-exec docker run --rm \
+# An optional extra mount and NIX_PATH, so the evaluator can be pointed at a
+# real nixpkgs tree (scripts/lib-check.sh) without this script knowing about it.
+MOUNT_ARGS=""
+if [ -n "${EVAL_EXTRA_MOUNT:-}" ]; then
+  MOUNT_ARGS="-v $EVAL_EXTRA_MOUNT"
+fi
+
+# shellcheck disable=SC2086  # MOUNT_ARGS is deliberately word-split
+exec docker run --rm $MOUNT_ARGS \
   -v "$REPO:/w" -w /w/impl/ocaml \
   -v img-drv-opam:/home/opam/.opam \
   --user root \
   -e OPAMROOT=/home/opam/.opam \
   -e EVAL_FILE="${EVAL_FILE:-/w/scripts/probe.nix}" \
+  -e NIX_PATH="${EVAL_NIX_PATH:-}" \
   "$ML_IMAGE" sh -c "
     eval \$(opam env --root=/home/opam/.opam) &&
     opam install -y --no-depexts $ML_PACKAGES >/dev/null 2>&1 || true

@@ -185,6 +185,55 @@ let eval_file directory =
      open itself. Same reason as the store hook above. *)
   Img_drv_nix.Builtins.read_source := read_file ;
   Img_drv_nix.Builtins.path_exists := Sys.file_exists ;
+  (Img_drv_nix.Builtins.read_dir :=
+     fun d -> Sys.readdir d |> Array.to_list |> List.sort String.compare) ;
+  (Img_drv_nix.Builtins.file_type :=
+     fun p ->
+       match (Unix.lstat p).Unix.st_kind with
+       | Unix.S_DIR -> "directory"
+       | Unix.S_LNK -> "symlink"
+       | _ -> "regular") ;
+  (* builtins.toFile computes its store path in the evaluator; only the bytes
+     are written here, and only so a builder could later read them. *)
+  (Img_drv_nix.Builtins.write_to_store :=
+     fun path text ->
+       try
+         let oc =
+           open_out_bin (Filename.concat directory (Filename.basename path))
+         in
+         output_string oc text ;
+         close_out oc
+       with Sys_error _ -> ()) ;
+  (* NIX_PATH, in the one form that matters here: entries of the shape
+     name=/path, so that <name/sub> resolves to /path/sub. Impure, and pinned
+     by whoever sets the variable. *)
+  (Img_drv_nix.Eval.resolve_search_path :=
+     fun spec ->
+       let root, sub =
+         match String.index_opt spec '/' with
+         | Some i ->
+             ( String.sub spec 0 i,
+               String.sub spec (i + 1) (String.length spec - i - 1) )
+         | None -> (spec, "")
+       in
+       let entries =
+         String.split_on_char
+           ':'
+           (Option.value (Sys.getenv_opt "NIX_PATH") ~default:"")
+       in
+       let found =
+         List.find_map
+           (fun entry ->
+             match String.index_opt entry '=' with
+             | Some i when String.equal (String.sub entry 0 i) root ->
+                 Some (String.sub entry (i + 1) (String.length entry - i - 1))
+             | _ -> None)
+           entries
+       in
+       match found with
+       | None ->
+           failwith (Printf.sprintf "file '%s' was not found in NIX_PATH" root)
+       | Some base -> if sub = "" then base else Filename.concat base sub) ;
   Img_drv_nix.Derivation_primop.reset () ;
   match
     Img_drv_nix.Builtins.eval_file

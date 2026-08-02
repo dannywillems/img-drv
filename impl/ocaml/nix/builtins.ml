@@ -48,6 +48,20 @@ let read_source : (string -> string) ref =
 (** Does this path exist? Injected, as above. *)
 let path_exists : (string -> bool) ref = ref (fun _ -> false)
 
+(** List a directory. Injected, as above. *)
+let read_dir : (string -> string list) ref = ref (fun _ -> [])
+
+(** ["regular"] | ["directory"] | ["symlink"], as [builtins.readFileType]
+    reports it. Injected, as above. *)
+let file_type : (string -> string) ref = ref (fun _ -> "regular")
+
+(** Materialise a [builtins.toFile] result on disk.
+
+    The evaluator computes the store PATH itself, which is the part that
+    affects a derivation's identity; writing the bytes is a side effect the CLI
+    performs, and a caller that only wants the IR can leave it a no-op. *)
+let write_to_store : (string -> string -> unit) ref = ref (fun _ _ -> ())
+
 (* Argument accessors. Each one names the type it wanted, because "value is a
    list while a set was expected" is the error Nix gives and the one a user can
    act on. *)
@@ -396,6 +410,318 @@ let to_json_primop args =
   let j = Eval.to_json (arg 0 args) ctx in
   Str (Json.to_string j, !ctx)
 
+(* Diagnostics. Nix writes these to stderr and returns the second argument, so
+   they are transparent to the value and to the store path. *)
+
+let trace_primop args =
+  prerr_endline
+    ("trace: " ^ fst (Eval.coerce_to_string ~copy_to_store:false (arg 0 args))) ;
+  arg 1 args
+
+let warn_primop args =
+  prerr_endline ("warning: " ^ want_string 0 args) ;
+  arg 1 args
+
+(** [addErrorContext msg e]. We do not carry an error-context stack, so this is
+    the identity on the value. Recorded as a deviation rather than hidden: the
+    VALUE is right and only a failure MESSAGE would be less informative, so it
+    cannot move a store path. *)
+let add_error_context_primop args = arg 1 args
+
+(** [unsafeGetAttrPos]. Returns null: we do not track source positions.
+
+    [lib] uses it only to improve error messages, and [null] is what Nix itself
+    returns when the position is unknown, so this is a supported answer rather
+    than a lie. *)
+let unsafe_get_attr_pos_primop args =
+  ignore (arg 0 args) ;
+  Null
+
+(* More lists *)
+
+let concat_map_primop args =
+  let f = arg 0 args in
+  Value.List
+    (List.concat_map
+       (fun t ->
+         match call f t with
+         | Value.List l -> l
+         | v -> error "value is %s while a list was expected" (type_name v))
+       (want_list 1 args))
+
+let partition_primop args =
+  let f = arg 0 args in
+  let yes, no =
+    List.partition (fun t -> Eval.truthy (call f t)) (want_list 1 args)
+  in
+  Attrs
+    (attrs_of_list
+       [("right", lazy (Value.List yes)); ("wrong", lazy (Value.List no))])
+
+let group_by_primop args =
+  let f = arg 0 args in
+  let table = Hashtbl.create 16 in
+  let order = ref [] in
+  List.iter
+    (fun t ->
+      let k = fst (Eval.coerce_to_string (call f t)) in
+      if not (Hashtbl.mem table k) then order := k :: !order ;
+      Hashtbl.replace
+        table
+        k
+        (t :: Option.value (Hashtbl.find_opt table k) ~default:[]))
+    (want_list 1 args) ;
+  Attrs
+    (attrs_of_list
+       (List.map
+          (fun k -> (k, lazy (Value.List (List.rev (Hashtbl.find table k)))))
+          (List.rev !order)))
+
+let zip_attrs_with_primop args =
+  let f = arg 0 args in
+  let sets =
+    List.map
+      (fun t ->
+        match force t with
+        | Attrs a -> a
+        | v -> error "value is %s while a set was expected" (type_name v))
+      (want_list 1 args)
+  in
+  let keys =
+    List.sort_uniq String.compare (List.concat_map (List.map fst) sets)
+  in
+  Attrs
+    (attrs_of_list
+       (List.map
+          (fun k ->
+            let vals = List.filter_map (fun a -> attrs_find a k) sets in
+            (k, lazy (call2 f (lazy (str k)) (lazy (Value.List vals)))))
+          keys))
+
+(** [genericClosure]. Breadth-first reachability from a start set, deduplicated
+    by a [key] attribute.
+
+    This is the one builtin that is a genuine ALGORITHM rather than a wrapper:
+    it computes the least fixed point of the operator "add everything the
+    current set reaches", which is exactly Kleene iteration on the powerset
+    lattice, and it terminates because that lattice has finite height once the
+    key set is finite. nixpkgs uses it for dependency closures. *)
+let generic_closure_primop args =
+  let a = want_attrs 0 args in
+  let start =
+    match attrs_find a "startSet" with
+    | Some t -> (
+        match force t with
+        | Value.List l -> l
+        | v -> error "value is %s while a list was expected" (type_name v))
+    | None -> error "genericClosure needs 'startSet'"
+  in
+  let op =
+    match attrs_find a "operator" with
+    | Some t -> force t
+    | None -> error "genericClosure needs 'operator'"
+  in
+  let seen = Hashtbl.create 64 in
+  let out = ref [] in
+  let key t =
+    match force t with
+    | Attrs e -> (
+        match attrs_find e "key" with
+        | Some k -> Eval.to_json (force k) (ref Context.empty) |> Json.to_string
+        | None -> error "a genericClosure element needs 'key'")
+    | v -> error "value is %s while a set was expected" (type_name v)
+  in
+  let rec go queue =
+    match queue with
+    | [] -> ()
+    | t :: rest ->
+        let k = key t in
+        if Hashtbl.mem seen k then go rest
+        else begin
+          Hashtbl.add seen k () ;
+          out := t :: !out ;
+          match call op t with
+          | Value.List l -> go (rest @ l)
+          | v -> error "value is %s while a list was expected" (type_name v)
+        end
+  in
+  go start ;
+  Value.List (List.rev !out)
+
+(* Versions. Nix's own comparison, which is NOT lexicographic and not semver. *)
+
+(** Split a version into its components, the way Nix does: maximal runs of
+    digits and maximal runs of letters, with everything else a separator. *)
+let split_version v =
+  let out = ref [] and b = Buffer.create 8 in
+  let kind = ref `None in
+  let flush () =
+    if Buffer.length b > 0 then begin
+      out := Buffer.contents b :: !out ;
+      Buffer.clear b
+    end
+  in
+  String.iter
+    (fun c ->
+      let k =
+        if c >= '0' && c <= '9' then `Digit
+        else if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') then `Alpha
+        else `Sep
+      in
+      if k <> !kind then flush () ;
+      kind := k ;
+      if k <> `Sep then Buffer.add_char b c)
+    v ;
+  flush () ;
+  List.rev !out
+
+let split_version_primop args =
+  Value.List
+    (List.map (fun p -> lazy (str p)) (split_version (want_string 0 args)))
+
+(** Compare two version components. The rule that surprises people: a component
+    that is PRE, RC, ALPHA, BETA or PRE sorts BELOW the empty component, so
+    "1.0pre1" is older than "1.0". *)
+let compare_component a b =
+  let rank s =
+    match String.lowercase_ascii s with
+    | "pre" | "rc" | "alpha" | "beta" -> -1
+    | "" -> 0
+    | _ -> 1
+  in
+  let numeric s = s <> "" && String.for_all (fun c -> c >= '0' && c <= '9') s in
+  if numeric a && numeric b then compare (int_of_string a) (int_of_string b)
+  else
+    let ra = if numeric a then 1 else rank a
+    and rb = if numeric b then 1 else rank b in
+    if ra <> rb then compare ra rb else compare a b
+
+let compare_versions_primop args =
+  let rec go a b =
+    match (a, b) with
+    | [], [] -> 0
+    | [], y :: ys ->
+        if compare_component "" y = 0 then go [] ys else compare_component "" y
+    | x :: xs, [] ->
+        if compare_component x "" = 0 then go xs [] else compare_component x ""
+    | x :: xs, y :: ys ->
+        let c = compare_component x y in
+        if c <> 0 then c else go xs ys
+  in
+  Value.Int
+    (go
+       (split_version (want_string 0 args))
+       (split_version (want_string 1 args)))
+
+(** [parseDrvName]. Splits at the first dash NOT followed by a letter, which is
+    how "gtk+-2.0" keeps its plus and "libfoo-1.2" does not keep its version. *)
+let parse_drv_name_primop args =
+  let s = want_string 0 args in
+  let n = String.length s in
+  let rec find i =
+    if i >= n - 1 then n
+    else if
+      s.[i] = '-'
+      && not
+           ((s.[i + 1] >= 'a' && s.[i + 1] <= 'z')
+           || (s.[i + 1] >= 'A' && s.[i + 1] <= 'Z'))
+    then i
+    else find (i + 1)
+  in
+  let i = find 0 in
+  Attrs
+    (attrs_of_list
+       [
+         ("name", lazy (str (String.sub s 0 i)));
+         ( "version",
+           lazy (str (if i >= n then "" else String.sub s (i + 1) (n - i - 1)))
+         );
+       ])
+
+(* String context, as data *)
+
+let has_context_primop args =
+  Bool (not (Context.is_empty (snd (want_string_ctx 0 args))))
+
+(** [getContext]. Exposes the context as an attribute set, which is the one
+    place the three-case variant of [value.ml] becomes visible to a Nix
+    expression. Nix keys it by store path with [path]/[allOutputs]/[outputs]
+    flags; we report the same shape. *)
+let get_context_primop args =
+  let ctx = snd (want_string_ctx 0 args) in
+  let table = Hashtbl.create 8 in
+  Context.iter
+    (fun e ->
+      let path, entry =
+        match e with
+        | Opaque p -> (p, ("path", lazy (Bool true)))
+        | Drv_deep d -> (d, ("allOutputs", lazy (Bool true)))
+        | Built (o, d) -> (d, ("outputs", lazy (Value.List [lazy (str o)])))
+      in
+      Hashtbl.replace
+        table
+        path
+        (entry :: Option.value (Hashtbl.find_opt table path) ~default:[]))
+    ctx ;
+  Attrs
+    (attrs_of_list
+       (Hashtbl.fold
+          (fun k v acc -> (k, lazy (Attrs (attrs_of_list v))) :: acc)
+          table
+          []))
+
+(* The store, and the filesystem *)
+
+(** [toFile name text]. Writes a file into the store and returns its path.
+
+    The SECOND thing in the language that can produce a store path, after
+    [derivation], and it uses the [text] kind rather than [source]: the content
+    is hashed directly, with no NAR, and the references come from the string's
+    own context. Sharing that references rule with a `.drv` path is why one bug
+    in [makeType] was two bugs (docs/spec/store-paths.md). *)
+let to_file_primop args =
+  let name = want_string 0 args in
+  let text, ctx = want_string_ctx 1 args in
+  let refs =
+    Context.fold
+      (fun e acc ->
+        match e with
+        | Opaque p -> p :: acc
+        | Built (_, d) | Drv_deep d -> d :: acc)
+      ctx
+      []
+    |> List.sort_uniq String.compare
+  in
+  let kind = if refs = [] then "text" else "text:" ^ String.concat ":" refs in
+  let path =
+    Store.store_path ~kind ~inner:(Types.Sha256_hex.v (Sha256.hex text)) ~name
+    |> Types.Store_path.to_string
+  in
+  !write_to_store path text ;
+  Str (path, Context.singleton (Opaque path))
+
+let read_file_primop args =
+  let s = !read_source (no_copy 0 args) in
+  Str (s, Context.empty)
+
+let read_dir_primop args =
+  let d = no_copy 0 args in
+  Attrs
+    (attrs_of_list
+       (List.map
+          (fun name -> (name, lazy (str (!file_type (Filename.concat d name)))))
+          (!read_dir d)))
+
+let read_file_type_primop args = str (!file_type (no_copy 0 args))
+
+(** [getEnv]. Impure by construction, and it returns the empty string for an
+    unset variable rather than failing, which is what lets [lib] use it for
+    optional configuration. We report everything as unset: a reproducible IR
+    must not depend on the caller's environment. *)
+let get_env_primop args =
+  ignore (want_string 0 args) ;
+  str ""
+
 let primop name arity impl = (name, lazy (Primop (name, arity, impl)))
 
 (** The environment an expression is evaluated in.
@@ -441,6 +767,10 @@ let rec global_env () : env =
       primop "any" 2 any_primop;
       primop "sort" 2 sort_primop;
       primop "elem" 2 elem_primop;
+      primop "concatMap" 2 concat_map_primop;
+      primop "partition" 2 partition_primop;
+      primop "groupBy" 2 group_by_primop;
+      primop "genericClosure" 1 generic_closure_primop;
       (* sets *)
       primop "attrNames" 1 attr_names_primop;
       primop "attrValues" 1 attr_values_primop;
@@ -452,6 +782,8 @@ let rec global_env () : env =
       primop "intersectAttrs" 2 intersect_attrs_primop;
       primop "catAttrs" 2 cat_attrs_primop;
       primop "functionArgs" 1 function_args_primop;
+      primop "zipAttrsWith" 2 zip_attrs_with_primop;
+      primop "unsafeGetAttrPos" 2 unsafe_get_attr_pos_primop;
       (* arithmetic *)
       primop "add" 2 (arith ( + ) ( +. ));
       primop "sub" 2 (arith ( - ) ( -. ));
@@ -466,14 +798,29 @@ let rec global_env () : env =
       primop "abort" 1 throw_primop;
       primop "tryEval" 1 try_eval_primop;
       primop "seq" 2 seq_primop;
+      primop "trace" 2 trace_primop;
+      primop "warn" 2 warn_primop;
+      primop "addErrorContext" 2 add_error_context_primop;
       primop "deepSeq" 2 seq_primop;
       (* paths *)
       primop "baseNameOf" 1 base_name_of_primop;
       primop "dirOf" 1 dir_of_primop;
       primop "pathExists" 1 path_exists_primop;
       primop "import" 1 import_primop;
+      primop "readFile" 1 read_file_primop;
+      primop "readDir" 1 read_dir_primop;
+      primop "readFileType" 1 read_file_type_primop;
+      primop "getEnv" 1 get_env_primop;
+      primop "toFile" 2 to_file_primop;
       (* JSON *)
       primop "toJSON" 1 to_json_primop;
+      (* versions and names *)
+      primop "splitVersion" 1 split_version_primop;
+      primop "compareVersions" 2 compare_versions_primop;
+      primop "parseDrvName" 1 parse_drv_name_primop;
+      (* string context, as data *)
+      primop "hasContext" 1 has_context_primop;
+      primop "getContext" 1 get_context_primop;
       (* the seam: see derivation_primop.ml *)
       primop "derivation" 1 Derivation_primop.derivation_primop;
       primop "derivationStrict" 1 Derivation_primop.derivation_primop;
@@ -485,6 +832,7 @@ let rec global_env () : env =
          machines. Pinned rather than read from the host. *)
       ("currentSystem", lazy (str "x86_64-linux"));
       ("nixVersion", lazy (str "2.24.9"));
+      ("storeDir", lazy (str "/nix/store"));
       ("langVersion", lazy (Value.Int 6));
     ]
   in

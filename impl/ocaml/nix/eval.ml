@@ -39,6 +39,15 @@ and lookup_with withs x =
 let add_to_store : (string -> string * Context.t) ref =
   ref (fun p -> error "cannot add %s to the store: no store is wired up" p)
 
+(** Resolve [<nixpkgs/lib>] against the search path.
+
+    Injected, like the other two hooks, and impure by construction: the same
+    expression names a different tree on a different machine. That is why a
+    reproducible caller pins it, and why the default here is an error rather
+    than a guess. *)
+let resolve_search_path : (string -> string) ref =
+  ref (fun p -> error "<%s> needs a search path, which is not wired up" p)
+
 (** Coerce to a string the way an attribute of a derivation is coerced.
 
     Nix's rules, and they are not obvious: a Boolean becomes ["1"] or the empty
@@ -93,7 +102,7 @@ let rec eval (env : env) (e : t) : value =
   | Var "null" when attrs_find env.bindings "null" = None -> Null
   | Var x -> force (lookup env x)
   | Path p -> Value.Path p
-  | Search_path p -> error "<%s> needs a search path, which is not wired up" p
+  | Search_path p -> Value.Path (!resolve_search_path p)
   | Uri u -> Str (u, Context.empty)
   | Str parts | Ind_str parts ->
       let s, ctx = eval_parts env parts in
