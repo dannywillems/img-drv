@@ -276,7 +276,7 @@ func TestInvalidDescriptionsAreRejectedAtConstruction(t *testing.T) {
 	for _, key := range []string{"name", "out", "outputHash", "system", "builder", "outputs"} {
 		t.Run("reserved "+key, func(t *testing.T) {
 			b := base()
-			b.Env = map[string]string{key: "x"}
+			b.Env = map[string]JSONValue{key: Str("x")}
 			if _, err := Derive(b); !errors.Is(err, ErrReservedEnvKey) {
 				t.Errorf("%q was accepted: %v", key, err)
 			}

@@ -44,6 +44,7 @@ use std::path::{Path, PathBuf};
 
 use crate::aterm::{Serialize, unparse, unparse_with};
 use crate::derivation::{Derivation, InputDrv, Output, OutputName, Sha256Hex, StorePath};
+use crate::json::JsonValue;
 use crate::store::{
     base32_decode, base32_length, drv_path, fixed_output_input_hash, output_paths, sha256_hex,
 };
@@ -157,6 +158,8 @@ pub enum InvalidDerivation {
     },
     /// A declared hash that could not be decoded.
     Hash(String),
+    /// Non-string env values were supplied without `structured_attrs`.
+    UntypedEnvNeedsStructuredAttrs(Vec<String>),
 }
 
 impl fmt::Display for InvalidDerivation {
@@ -181,6 +184,11 @@ impl fmt::Display for InvalidDerivation {
                 write!(f, "{drv:?} has no output {wanted:?}; it has {have:?}")
             }
             Self::Hash(why) => f.write_str(why),
+            Self::UntypedEnvNeedsStructuredAttrs(k) => write!(
+                f,
+                "env values {k:?} are not strings; the flat encoding can only \
+                 carry strings, so set structured_attrs: true"
+            ),
         }
     }
 }
@@ -575,7 +583,16 @@ pub struct Build {
     /// (`name`, `system`, `builder`, `outputs`, the output names, and the
     /// `outputHash*` trio) are rejected here, because supplying one would let
     /// the env disagree with the field it mirrors.
-    pub env: BTreeMap<String, String>,
+    /// Values are [`JsonValue`] rather than `String` because `structured_attrs`
+    /// can carry types. With it off, every value must be a
+    /// [`JsonValue::String`]; anything else is refused, because the flat
+    /// encoding cannot represent it.
+    pub env: BTreeMap<String, JsonValue>,
+    /// Select the SECOND env encoding (`spec/canonical.md` section 1.8):
+    /// attributes carried as one `__json` entry with their types preserved,
+    /// rather than one string-valued variable each. 1223 of 2516 real
+    /// derivations use it.
+    pub structured_attrs: bool,
     /// `None` and `Some(vec!["out"])` are DIFFERENT derivations with different
     /// store paths: Nix emits an `outputs` env variable exactly when the caller
     /// declared the attribute. Both occur in real nixpkgs. See
@@ -601,6 +618,8 @@ const RESERVED: &[&str] = &[
     "outputHash",
     "outputHashAlgo",
     "outputHashMode",
+    "__json",
+    "__structuredAttrs",
 ];
 
 /// Describe a build. This is the whole eDSL.
@@ -649,20 +668,64 @@ pub fn derivation(b: Build) -> Result<Drv, InvalidDerivation> {
         return Err(InvalidDerivation::ReservedEnvKeys(clashes));
     }
 
-    let mut env = b.env.clone();
-    env.insert("name".to_owned(), b.name.clone());
-    env.insert("system".to_owned(), b.system.clone());
-    env.insert("builder".to_owned(), b.builder.clone());
-    if declared {
-        let joined = names
+    if !b.structured_attrs {
+        let untyped: Vec<String> = b
+            .env
             .iter()
-            .map(|n| n.to_string())
-            .collect::<Vec<_>>()
-            .join(" ");
-        env.insert("outputs".to_owned(), joined);
+            .filter(|(_, v)| !matches!(v, JsonValue::String(_)))
+            .map(|(k, _)| k.clone())
+            .collect();
+        if !untyped.is_empty() {
+            return Err(InvalidDerivation::UntypedEnvNeedsStructuredAttrs(untyped));
+        }
     }
-    if let Some(fixed) = &b.fixed_output {
-        env.extend(fixed.env());
+
+    let mut env: BTreeMap<String, String> = BTreeMap::new();
+    if b.structured_attrs {
+        // One __json entry carrying every attribute WITH ITS TYPE, plus one
+        // entry per output. The output paths stay OUTSIDE the JSON, which is
+        // why masking needs no special case. See spec/canonical.md 1.8.
+        let mut attrs = b.env.clone();
+        attrs.insert("name".to_owned(), JsonValue::String(b.name.clone()));
+        attrs.insert("system".to_owned(), JsonValue::String(b.system.clone()));
+        attrs.insert("builder".to_owned(), JsonValue::String(b.builder.clone()));
+        if declared {
+            attrs.insert(
+                "outputs".to_owned(),
+                JsonValue::Array(
+                    names
+                        .iter()
+                        .map(|n| JsonValue::String(n.to_string()))
+                        .collect(),
+                ),
+            );
+        }
+        if let Some(fixed) = &b.fixed_output {
+            for (k, v) in fixed.env() {
+                attrs.insert(k, JsonValue::String(v));
+            }
+        }
+        env.insert("__json".to_owned(), JsonValue::Object(attrs).to_json());
+    } else {
+        for (k, v) in &b.env {
+            if let JsonValue::String(s) = v {
+                env.insert(k.clone(), s.clone());
+            }
+        }
+        env.insert("name".to_owned(), b.name.clone());
+        env.insert("system".to_owned(), b.system.clone());
+        env.insert("builder".to_owned(), b.builder.clone());
+        if declared {
+            let joined = names
+                .iter()
+                .map(|n| n.to_string())
+                .collect::<Vec<_>>()
+                .join(" ");
+            env.insert("outputs".to_owned(), joined);
+        }
+        if let Some(fixed) = &b.fixed_output {
+            env.extend(fixed.env());
+        }
     }
     // Placeholders. The real paths are the hash of the derivation that contains
     // them, so they cannot be known until the next step, and the masked form

@@ -156,13 +156,62 @@ when the algorithm is already carried by an SRI-format `outputHash`).
 ### 1.8 A second env encoding: `__structuredAttrs`
 
 1223 of the 2516 real derivations in the corpus do not use the encoding above
-at all. They carry a single `("__json", "{...}")` entry holding every attribute
-as JSON, and consequently have no `name`, `builder` or `system` env variable.
+at all. They carry a single `__json` entry holding the attributes as JSON,
+plus one entry per output. This is `__structuredAttrs = true`, now the nixpkgs
+default for many builders, and it exists because the flat encoding can only
+carry strings: a list, a boolean or a nested attribute set has to be flattened
+to a string and re-parsed by the builder. The JSON encoding keeps the types.
 
-This is `__structuredAttrs = true`, now the nixpkgs default for many builders.
-It is a genuinely different serialization of the same information and it is
-**not yet specified here**, which is a real limit on what the eDSL can express:
-see `PLAN.md`.
+Every rule below was established by instantiating probes with the pinned Nix
+([`../../scripts/probe-structured.nix`](../../scripts/probe-structured.nix))
+and by measuring the 456 structured derivations in a real closure.
+
+**The env is exactly `__json` plus one entry per output name**, sorted by key
+like any other env. Measured: of the 456, the key sets are `__json` plus the
+declared outputs, with nothing else. Verified on 456 of 456.
+
+**Output paths are NOT in the JSON.** They stay as ordinary env entries keyed
+by output name, exactly as in the flat encoding. That is why the masking rule
+in [`store-paths.md`](store-paths.md) needs no special case: blanking env
+entries whose KEY is an output name still finds them. Confirmed by recomputing
+paths for a 1458-derivation closure containing 456 structured derivations:
+2063 of 2063.
+
+**The JSON is canonical**, and its form is pinned:
+
+| rule | verified |
+| --- | --- |
+| object keys sorted ascending | 456 of 456 |
+| compact separators, `,` and `:`, no spaces | 456 of 456 |
+| non-ASCII emitted raw, not `\uXXXX` escaped | 456 of 456 |
+
+**What the JSON contains**: every user attribute WITH ITS TYPE PRESERVED
+(string, integer, boolean, list, nested object), plus the synthesized `name`,
+`system` and `builder`. `args` is absent, as in the flat encoding, because it
+is a positional field of the derivation rather than an attribute.
+`__structuredAttrs` itself is consumed and does not appear.
+
+**`outputs` inside the JSON follows the same OPTION rule** as the flat
+encoding's `outputs` env variable: present, in DECLARATION order, exactly when
+the caller declared it. A probe declaring `outputs = [ "out" "dev" ]` yields
+`"outputs":["out","dev"]` while the outputs tuple is sorted `dev`, `out`; a
+probe declaring nothing yields a JSON with no `outputs` key at all. See
+[`examples/structured.drv`](examples/sqgix69fbs6hjh5kmf2pb1zvfmi5d0am-structured.drv).
+
+**A fixed-output structured derivation puts `outputHash`, `outputHashAlgo` and
+`outputHashMode` INSIDE the JSON**, not in the env, while the outputs tuple
+still carries the hash re-encoded as hex per section 1.1. This is why a reader
+that looks for `outputHash` as an env key finds nothing on 1146 of the corpus's
+1239 fixed-output derivations.
+
+**Consequence for the signature.** The flat encoding needs only
+`[(String, String)]`. This one needs a JSON value, which is a RECURSIVE sum:
+`null | bool | int | float | string | [value] | {string: value}`. That is the
+first recursive type in `docs/spec/signature.md`, and the first place the
+signature needs more than products, finite sums and lists of primitives. It is
+still a first-order algebraic datatype, so `theory.md` section 1 survives, but
+it is a genuine extension and it is where a language without sum types has to
+work hardest.
 
 ## 2. String escaping
 

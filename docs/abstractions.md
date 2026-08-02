@@ -389,3 +389,57 @@ before the code did. That is the argument for writing the vectors first.
 byte-identical to each other and to what real Nix emitted. The portability
 claim is as well supported as this kind of claim can be, which is what
 `PLAN.md` phase 2 set as its exit test.
+
+## 9. The first recursive type, and the cleanest measurement yet
+
+**Date:** 2026-08-02, with `__structuredAttrs`.
+
+**Structure.** Supporting the second env encoding forces a JSON value into the
+signature, and a JSON value is an inductive datatype: the least fixed point of
+the polynomial functor
+
+```
+F(X) = 1 + Bool + Int + Float + String + List(X) + List(String x X)
+```
+
+Everything in the signature until now was a product of primitives and lists of
+them, which is exactly what `theory.md` section 1 restricts it to. This is the
+first least fixed point, so the restriction is now "products, finite sums,
+lists, primitives, AND least fixed points of those". Still first-order, still
+algebraic, so the Lawvere argument survives; but it is a genuine extension and
+it was not optional, because 1223 of 2516 real derivations use the encoding.
+
+**Why it is the cleanest measurement in the project.** One seven-case recursive
+sum, four languages, and the cost is starkly different:
+
+| language | encoding | cost |
+| --- | --- | --- |
+| OCaml | 7-case variant | 7 lines; every `match` checked exhaustive |
+| Rust | 7-variant `enum` | 7 lines; every `match` checked exhaustive |
+| Python | recursive `TypeAlias` | 1 alias; checked by mypy, erased at runtime |
+| Go | struct with a discriminant + 7 fields + 7 constructors | ~40 lines, and `JSONValue{}` is a REPRESENTABLE value of an invalid shape |
+
+Every earlier row of the typing table compared how an invariant is CHECKED.
+This one compares how a TYPE is spelled, and Go is the only language where the
+encoding admits values the type is supposed to exclude: `Kind` and the payload
+fields can disagree, and only a runtime convention keeps them in step. That is
+the concrete content of "no sum types", and it took a recursive sum to make it
+visible; the earlier two-case sums (`HashAlgo`, `Option`) were small enough to
+paper over.
+
+**What did NOT change, which is the reassuring part.** The masking rule needed
+no special case. Structured derivations keep their output paths as ordinary env
+entries keyed by output name and put only the output NAMES in the JSON, so
+blanking by key still finds them. Verified before any code was written, by
+recomputing paths for a 1458-derivation closure containing 456 structured
+derivations: 2063 of 2063. `theory.md` section 7 covers both encodings
+unchanged.
+
+**The Option rule recurs, at a second site.** `outputs` inside the JSON is
+present exactly when the caller declared it, exactly as the flat encoding's
+`outputs` env variable is. Two independent encodings, the same Option, which is
+evidence that entry 4 identified a rule of the FORMAT rather than a quirk of
+one serialization.
+
+**Conformance:** 11 intents, 4 implementations, byte-identical to each other
+and to real Nix.

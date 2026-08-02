@@ -8,7 +8,7 @@ This is the reference implementation. The Go, Rust and OCaml ports are checked
 against it, and all four are checked against real Nix.
 
 **Status:** the derivation format, store path computation and the eDSL surface
-are implemented and verified. Describing each of the ten golden examples
+are implemented and verified. Describing each of the eleven golden examples
 reproduces the bytes real Nix emitted, including the derivation's own store
 path.
 

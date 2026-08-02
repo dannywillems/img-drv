@@ -95,6 +95,9 @@ var (
 	ErrReservedEnvKey      = errors.New("env key is derived from another field")
 	ErrNoSuchOutput        = errors.New("no such output")
 	ErrHash                = errors.New("invalid hash")
+	ErrUntypedEnv          = errors.New(
+		"env value is not a string; the flat encoding can only carry " +
+			"strings, so set StructuredAttrs")
 )
 
 // nameMax is Nix's store-name length cap.
@@ -474,7 +477,16 @@ type Build struct {
 	// Env holds extra environment entries. The ones derived from the other
 	// fields are rejected, because supplying one would let the env disagree
 	// with the field it mirrors.
-	Env map[string]string
+	//
+	// Values are JSONValue rather than string because StructuredAttrs can
+	// carry types. With it off, every value must be a JSON string; anything
+	// else is refused, because the flat encoding cannot represent it.
+	Env map[string]JSONValue
+	// StructuredAttrs selects the SECOND env encoding (spec/canonical.md
+	// section 1.8): attributes carried as one __json entry with their types
+	// preserved, rather than one string-valued variable each. 1223 of 2516
+	// real derivations use it.
+	StructuredAttrs bool
 	// Outputs is the Option: zero value means undeclared. See the Outputs type.
 	Outputs Outputs
 	// InputDrvs are edges to other derivations, built with Drv.Needs.
@@ -491,6 +503,7 @@ type Build struct {
 var reserved = []string{
 	"name", "system", "builder", "outputs",
 	"outputHash", "outputHashAlgo", "outputHashMode",
+	"__json", "__structuredAttrs",
 }
 
 // Derive describes a build. This is the whole eDSL.
@@ -539,20 +552,19 @@ func Derive(b Build) (Drv, error) {
 		return Drv{}, fmt.Errorf("%w: %v", ErrReservedEnvKey, clashes)
 	}
 
-	env := map[string]string{}
-	for k, v := range b.Env {
-		env[k] = v
-	}
-	env["name"] = b.Name
-	env["system"] = b.System
-	env["builder"] = b.Builder
-	if b.Outputs.Declared {
-		parts := make([]string, 0, len(names))
-		for _, n := range names {
-			parts = append(parts, string(n))
+	if !b.StructuredAttrs {
+		untyped := []string{}
+		for k, v := range b.Env {
+			if !v.IsString() {
+				untyped = append(untyped, k)
+			}
 		}
-		env["outputs"] = strings.Join(parts, " ")
+		if len(untyped) > 0 {
+			sort.Strings(untyped)
+			return Drv{}, fmt.Errorf("%w: %v", ErrUntypedEnv, untyped)
+		}
 	}
+
 	var algo, digest string
 	if b.FixedOutput != nil {
 		var err error
@@ -562,8 +574,51 @@ func Derive(b Build) (Drv, error) {
 		if _, digest, err = b.FixedOutput.Resolve(); err != nil {
 			return Drv{}, err
 		}
-		for k, v := range b.FixedOutput.env() {
-			env[k] = v
+	}
+
+	env := map[string]string{}
+	if b.StructuredAttrs {
+		// One __json entry carrying every attribute WITH ITS TYPE, plus one
+		// entry per output. The output paths stay OUTSIDE the JSON, which is
+		// why masking needs no special case. See spec/canonical.md 1.8.
+		attrs := map[string]JSONValue{}
+		for k, v := range b.Env {
+			attrs[k] = v
+		}
+		attrs["name"] = Str(b.Name)
+		attrs["system"] = Str(b.System)
+		attrs["builder"] = Str(b.Builder)
+		if b.Outputs.Declared {
+			items := make([]JSONValue, 0, len(names))
+			for _, n := range names {
+				items = append(items, Str(string(n)))
+			}
+			attrs["outputs"] = Array(items...)
+		}
+		if b.FixedOutput != nil {
+			for k, v := range b.FixedOutput.env() {
+				attrs[k] = Str(v)
+			}
+		}
+		env["__json"] = Object(attrs).JSON()
+	} else {
+		for k, v := range b.Env {
+			env[k] = v.Str
+		}
+		env["name"] = b.Name
+		env["system"] = b.System
+		env["builder"] = b.Builder
+		if b.Outputs.Declared {
+			parts := make([]string, 0, len(names))
+			for _, n := range names {
+				parts = append(parts, string(n))
+			}
+			env["outputs"] = strings.Join(parts, " ")
+		}
+		if b.FixedOutput != nil {
+			for k, v := range b.FixedOutput.env() {
+				env[k] = v
+			}
 		}
 	}
 	// Placeholders. The real paths are the hash of the derivation that contains

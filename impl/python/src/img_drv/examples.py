@@ -126,6 +126,34 @@ def fixed() -> Drv:
     )
 
 
+def structured() -> Drv:
+    """`__structuredAttrs`: attributes as JSON, with their types preserved.
+
+    The flat encoding can only carry strings, so a boolean, an integer, a list
+    or a nested attribute set has to be flattened and re-parsed by the builder.
+    This one keeps them. 1223 of 2516 real derivations use it.
+
+    It also exercises the same two-orderings rule as `multi`: the outputs tuple
+    comes out sorted (`dev`, `out`) while `outputs` inside the JSON keeps
+    declaration order (`out`, `dev`).
+    """
+    return derivation(
+        name="structured",
+        system=SYSTEM,
+        builder=SH,
+        args=["-c", "echo hi > $out"],
+        outputs=["out", "dev"],
+        structured_attrs=True,
+        env={
+            "aFlag": True,
+            "aNumber": 42,
+            "aList": ["x", "y"],
+            "nested": {"deep": {"deeper": "value"}},
+            "aString": "plain",
+        },
+    )
+
+
 #: Golden file name -> the intent that must reproduce it byte for byte.
 CORPUS: Mapping[str, Callable[[], Drv]] = {
     "34h63y306vjiqi9974m0abrkp8aplgjq-dependent.drv": dependent,
@@ -136,6 +164,7 @@ CORPUS: Mapping[str, Callable[[], Drv]] = {
     "h3ik45ycljylpdzjssckqi3vvslsbxpn-many.drv": many,
     "k1lc1y192xiajlyy4zvsdnfprnjx32i3-dep-a.drv": dep_a,
     "mfdcxzh0v906c5hngb3x0b7sjl130hpk-ordering.drv": ordering,
+    "sqgix69fbs6hjh5kmf2pb1zvfmi5d0am-structured.drv": structured,
     "v27a425rg4n7prwzpyyw0y1fw2ssc46f-multi.drv": multi,
     "vk8wqbqg3k8w4134kwa0392kbc1953aq-mmm.drv": mmm,
 }

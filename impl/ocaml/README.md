@@ -9,7 +9,7 @@ whether the signature can be expressed with almost no type system, OCaml asks
 the opposite question: how much of the specification can a type system make
 **unrepresentable** rather than merely checked?
 
-**Status:** all ten golden intents reproduce Nix's bytes, including each
+**Status:** all eleven golden intents reproduce Nix's bytes, including each
 derivation's own `.drv` store path. `make conformance` shows Python, Rust, Go
 and OCaml emitting identical bytes.
 
@@ -83,7 +83,10 @@ Rust needs three newtype declarations for that, Go three defined types.
 Being fair about it, three of the four rows OCaml wins are ties with Rust, and
 the ones that matter most are ties with everyone:
 
-- variants for `hash_algo` and `hash_mode`: the same as Rust's `enum`;
+- variants for `hash_algo`, `hash_mode` and the recursive `Json.t`: the same as
+  Rust's `enum`, and the last of those is where Go pays most (a seven-case
+  recursive sum becomes a struct with a discriminant and seven fields, in which
+  an invalid shape is representable);
 - native `option` for `outputs`: the same as Rust's `Option`, and only better
   than Go, which needed three encodings;
 - structural equality with `=`: free, like Python and Rust, unlike Go.
@@ -145,6 +148,7 @@ checks. This is one of the real outputs of the project, now complete.
 | env insertion order not observable | property test | free | free, enforced by randomised iteration | property test |
 | structural equality | free | free | hand-written per type | free |
 | exhaustiveness over failure cases | n/a | `match` | sentinels, no check | `match` |
+| a recursive 7-case sum (a JSON value) | recursive `TypeAlias`, erased | 7-variant `enum` | **struct + discriminant + 7 fields; an invalid shape is representable** | 7-case variant |
 | **name is a valid store name** | runtime | runtime | runtime | **unrepresentable** |
 | outputs non-empty, one fixed output | runtime | runtime | runtime | runtime |
 | recorded paths match the derivation's own hash | runtime | runtime | runtime | runtime |

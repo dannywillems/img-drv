@@ -99,7 +99,11 @@ let ordering () =
     (base
        "ordering"
        ~env:
-         [("zzz", "last-declared-first"); ("aaa", "first"); ("mmm", "middle")]
+         [
+           ("zzz", Json.String "last-declared-first");
+           ("aaa", Json.String "first");
+           ("mmm", Json.String "middle");
+         ]
        ())
 
 (** Three outputs, which carries TWO orderings of the same list. *)
@@ -119,6 +123,34 @@ let fixed () =
        ~fixed_output:(Edsl.fixed ~algo:Edsl.Sha256 (String.make 52 '0'))
        ())
 
+(** [__structuredAttrs]: attributes as JSON, with their types preserved.
+
+    The flat encoding can only carry strings, so a boolean, an integer, a list
+    or a nested attribute set has to be flattened and re-parsed by the builder.
+    This one keeps them. 1223 of 2516 real derivations use it.
+
+    It also exercises the same two-orderings rule as {!multi}: the outputs
+    tuple comes out sorted ([dev], [out]) while [outputs] inside the JSON keeps
+    declaration order ([out], [dev]). *)
+let structured () =
+  derive_exn
+    (base
+       "structured"
+       ~args:["-c"; "echo hi > $out"]
+       ~outputs:[name_exn "out"; name_exn "dev"]
+       ~structured_attrs:true
+       ~env:
+         [
+           ("aFlag", Json.Bool true);
+           ("aNumber", Json.Int 42);
+           ("aList", Json.strings ["x"; "y"]);
+           ( "nested",
+             Json.Object
+               [("deep", Json.Object [("deeper", Json.String "value")])] );
+           ("aString", Json.String "plain");
+         ]
+       ())
+
 (** Golden file name, and the intent that must reproduce it byte for byte. *)
 let corpus () =
   [
@@ -130,6 +162,7 @@ let corpus () =
     ("h3ik45ycljylpdzjssckqi3vvslsbxpn-many.drv", many ());
     ("k1lc1y192xiajlyy4zvsdnfprnjx32i3-dep-a.drv", dep_a ());
     ("mfdcxzh0v906c5hngb3x0b7sjl130hpk-ordering.drv", ordering ());
+    ("sqgix69fbs6hjh5kmf2pb1zvfmi5d0am-structured.drv", structured ());
     ("v27a425rg4n7prwzpyyw0y1fw2ssc46f-multi.drv", multi ());
     ("vk8wqbqg3k8w4134kwa0392kbc1953aq-mmm.drv", mmm ());
   ]

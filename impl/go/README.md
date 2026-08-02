@@ -15,11 +15,11 @@ So the result comes first, and the rest of this file is the evidence.
 
 ## The result
 
-**The signature needed nothing beyond finite products.** Every operation and
-every sort in the specification is expressible in Go, and all ten golden
-intents reproduce Nix's bytes exactly, including each derivation's own `.drv`
-store path. `make conformance` shows Python, Rust and Go emitting identical
-bytes.
+**The signature needed nothing beyond finite products and one least fixed
+point.** Every operation and every sort in the specification is expressible in
+Go, and all eleven golden intents reproduce Nix's bytes exactly, including each
+derivation's own `.drv` store path. `make conformance` shows Python, Rust, Go
+and OCaml emitting identical bytes.
 
 Nothing turned out to be INEXPRESSIBLE. What Go loses is **enforcement** and
 **uniformity**:
@@ -166,7 +166,30 @@ returns a `reflect.Value`, so the single place this implementation touches
 runtime typing is its **property tests**. `quick` also does not shrink, so a
 failure reports whatever value happened to break rather than the smallest one.
 
-### 9. Generics were needed, barely, and only the weak kind
+### 9. The recursive sum is where it hurts most
+
+`__structuredAttrs` forces a JSON value into the signature, and a JSON value is
+a seven-case RECURSIVE sum. This is the sharpest cost in this file, because
+unlike everything above it is not about how an invariant is checked but about
+whether the type can be spelled at all.
+
+| language | encoding | cost |
+| --- | --- | --- |
+| OCaml, Rust | a 7-case variant / `enum` | 7 lines, exhaustive matching |
+| Python | a recursive `TypeAlias` | 1 alias |
+| **Go** | struct + `Kind` discriminant + 7 fields + 7 constructors | ~40 lines |
+
+And the difference is not only length. `JSONValue{}` is a **representable value
+of an invalid shape**: `Kind` and the payload fields can disagree, and only a
+runtime convention keeps them in step. A variant makes that unrepresentable.
+The earlier two-case sums (`HashAlgo`, `Outputs`) were small enough that the
+encoding papered over it; a recursive seven-case sum is not.
+
+Note carefully what this is NOT: it is not inexpressible, the JSON round-trips,
+and the bytes match all three other implementations. It is the same verdict as
+everything else here, just louder.
+
+### 10. Generics were needed, barely, and only the weak kind
 
 Four generic functions: `equalSlice`, `sortedCopy`, `dedupe`, `listOf`. Every
 one has an identical body for every type parameter, constrained by
@@ -225,6 +248,7 @@ checks. This is one of the real outputs of the project.
 | env insertion order not observable | property test | free (`BTreeMap`) | free, and enforced by randomised iteration |
 | structural equality | free (`@dataclass`) | free (`derive`) | **hand-written per type** |
 | exhaustiveness over failure cases | n/a | `match` on an enum | **sentinel errors, no check** |
+| a recursive 7-case sum (a JSON value) | recursive `TypeAlias`, erased | 7-variant `enum` | **struct + discriminant + 7 fields; an invalid shape is representable** |
 | outputs non-empty, names valid, one fixed output | runtime | runtime | runtime |
 | recorded paths match the derivation's own hash | runtime | runtime | runtime |
 

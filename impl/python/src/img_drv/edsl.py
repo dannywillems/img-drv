@@ -45,11 +45,12 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 import pathlib
 import string
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Final, Literal, cast
+from typing import Final, Literal, TypeAlias, cast
 
 from .aterm import unparse
 from .derivation import (
@@ -76,10 +77,32 @@ __all__ = [
     "HashAlgo",
     "HashMode",
     "InvalidDerivationError",
+    "JsonValue",
     "canonical",
     "derivation",
+    "json_env",
     "valid_name",
 ]
+
+#: A JSON value, as `__structuredAttrs` carries it.
+#:
+#: This is the first RECURSIVE type in the signature. Everything else is a
+#: product of primitives and lists of them, which is what `docs/theory.md`
+#: section 1 restricts the signature to; a JSON value is an inductive datatype,
+#: a fixed point of a polynomial functor. Still first-order and still
+#: algebraic, so the Lawvere argument survives, but it is a genuine extension
+#: and it is where a language without sum types has to work hardest.
+#: Written as a `TypeAlias` with forward references rather than the 3.12
+#: `type` statement, because the supported floor is 3.11.
+JsonValue: TypeAlias = (
+    str
+    | int
+    | float
+    | bool
+    | Sequence["JsonValue"]
+    | Mapping[str, "JsonValue"]
+    | None
+)
 
 #: The hash algorithms Nix accepts for a fixed-output derivation.
 HashAlgo = Literal["md5", "sha1", "sha256", "sha512"]
@@ -109,7 +132,10 @@ _HASH_KEYS: Final[frozenset[str]] = frozenset(
     ("outputHash", "outputHashAlgo", "outputHashMode")
 )
 _ALWAYS_RESERVED: Final[frozenset[str]] = (
-    frozenset(("name", "system", "builder", "outputs")) | _HASH_KEYS
+    frozenset(
+        ("name", "system", "builder", "outputs", "__json", "__structuredAttrs")
+    )
+    | _HASH_KEYS
 )
 
 _DEFAULT_OUTPUT: Final = OutputName("out")
@@ -235,6 +261,19 @@ class FixedOutput:
         if self.algo is not None:
             out["outputHashAlgo"] = self.algo
         return out
+
+
+def json_env(attrs: Mapping[str, JsonValue]) -> str:
+    """Serialize attributes the way `__structuredAttrs` does.
+
+    Canonical, and the form is measured rather than chosen: object keys sorted
+    ascending, compact separators, and non-ASCII emitted raw rather than
+    ``\\uXXXX`` escaped. All three hold on 456 of 456 structured derivations
+    in a real closure. See ``spec/canonical.md`` section 1.8.
+    """
+    return json.dumps(
+        attrs, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
 
 
 def _b64(text: str) -> bytes:
@@ -372,8 +411,9 @@ def derivation(
     system: str,
     builder: str,
     args: Sequence[str] = (),
-    env: Mapping[str, str] | None = None,
+    env: Mapping[str, JsonValue] | None = None,
     outputs: Sequence[str] | None = None,
+    structured_attrs: bool = False,
     input_drvs: Sequence[Dep | Drv] = (),
     input_srcs: Sequence[str] = (),
     fixed_output: FixedOutput | None = None,
@@ -383,6 +423,14 @@ def derivation(
     Keyword-only on purpose: nine positional arguments of mostly strings is a
     transposition waiting to happen, and ``system`` and ``builder`` are both
     strings that would silently swap.
+
+    ``structured_attrs`` selects the SECOND env encoding (see
+    ``spec/canonical.md`` section 1.8): attributes are carried as one
+    ``__json`` entry with their types preserved, rather than one
+    string-valued variable each. 1223 of 2516 real derivations use it, and it
+    is the only way to hand a builder a list, a boolean or a nested attribute
+    set without flattening it to a string. With it off, every ``env`` value
+    must be a ``str``.
 
     ``outputs`` is an OPTION rather than a list defaulting to ``["out"]``, and
     the difference is observable in the bytes: passing ``None`` produces no
@@ -426,20 +474,48 @@ def derivation(
             f"env keys {clashes} are derived from the other arguments; "
             "set them through name/system/builder/outputs/fixed_output"
         )
+    if not structured_attrs:
+        untyped = sorted(
+            k for k, v in supplied.items() if not isinstance(v, str)
+        )
+        if untyped:
+            raise InvalidDerivationError(
+                f"env values {untyped} are not strings; the flat encoding can "
+                "only carry strings, so pass structured_attrs=True"
+            )
 
-    synthesized: dict[str, str] = {
-        "name": name,
-        "system": system,
-        "builder": builder,
-        # Placeholders. The real paths are the hash of the derivation that
-        # contains them, so they cannot be known until after the next step,
-        # and the masked form used to compute them blanks these anyway.
-        **{str(n): "" for n in names},
-    }
-    if declared:
-        synthesized["outputs"] = " ".join(names)
-    if fixed_output is not None:
-        synthesized.update(fixed_output.env())
+    # Placeholders for the output paths. The real ones are the hash of the
+    # derivation that contains them, so they cannot be known until after the
+    # next step, and the masked form used to compute them blanks these anyway.
+    placeholders = {str(n): "" for n in names}
+    synthesized: dict[str, str]
+    if structured_attrs:
+        # One __json entry carrying every attribute WITH ITS TYPE, plus one
+        # entry per output. The output paths stay outside the JSON, which is
+        # why masking needs no special case. See spec/canonical.md 1.8.
+        attrs: dict[str, JsonValue] = {
+            **supplied,
+            "name": name,
+            "system": system,
+            "builder": builder,
+        }
+        if declared:
+            attrs["outputs"] = list(names)
+        if fixed_output is not None:
+            attrs.update(fixed_output.env())
+        supplied = {}
+        synthesized = {"__json": json_env(attrs), **placeholders}
+    else:
+        synthesized = {
+            "name": name,
+            "system": system,
+            "builder": builder,
+            **placeholders,
+        }
+        if declared:
+            synthesized["outputs"] = " ".join(names)
+        if fixed_output is not None:
+            synthesized.update(fixed_output.env())
 
     algo = fixed_output.hash_algo_field if fixed_output else ""
     digest = fixed_output.hash_field if fixed_output else ""
@@ -456,7 +532,9 @@ def derivation(
             system=system,
             builder=builder,
             args=tuple(args),
-            env=tuple({**supplied, **synthesized}.items()),
+            env=tuple(
+                {**cast("dict[str, str]", supplied), **synthesized}.items()
+            ),
         )
     )
 

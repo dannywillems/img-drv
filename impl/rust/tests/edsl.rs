@@ -283,7 +283,7 @@ fn invalid_descriptions_are_rejected_at_construction() {
         assert!(
             matches!(
                 derivation(Build {
-                    env: BTreeMap::from([(key.to_owned(), "x".to_owned())]),
+                    env: BTreeMap::from([(key.to_owned(), "x".into())]),
                     ..base("x")
                 }),
                 Err(InvalidDerivation::ReservedEnvKeys(_))

@@ -8,9 +8,10 @@ This is the second implementation. It exists so that `make conformance` stops
 being vacuous: one implementation cannot disagree with itself.
 
 **Status:** the derivation format, store path computation and the eDSL surface
-are implemented and verified. All ten golden examples are reproduced
+are implemented and verified. All eleven golden examples are reproduced
 byte-identically from intent, including each derivation's own `.drv` store
-path, and `make conformance` shows Rust and Python emitting the same bytes.
+path, and `make conformance` shows all four implementations emitting the same
+bytes.
 
 ## Install
 
@@ -78,7 +79,7 @@ to find out where a first-order signature stops embedding cleanly.
 | keyword arguments | `Build { .. ..Default::default() }` | Rust has no keyword arguments. Arguably the more honest translation: `spec/signature.md` IS a finite product, and this is that product. |
 | `Drv.ref(...)` | `Drv::needs(...)` | `ref` is a keyword. |
 | `input_drvs=[drv]` accepted | `input_drvs: vec![drv.needs(&[])?]` | Converting a `Drv` to an edge can FAIL, when the target has no output named `out`. `From` cannot fail without panicking, so the shorthand is unavailable and the conversion is explicit. |
-| `env: Mapping[str, str]` | `env: BTreeMap<String, String>` | Both make key uniqueness free. `BTreeMap` additionally makes insertion order unobservable, so one Python property test becomes unrepresentable here (see below). |
+| `env: Mapping[str, JsonValue]` | `env: BTreeMap<String, JsonValue>` | Both make key uniqueness free. `BTreeMap` additionally makes insertion order unobservable, so one Python property test becomes unrepresentable here (see below). |
 
 ## The typing table
 
@@ -94,6 +95,7 @@ outputs of the project, not bookkeeping.
 | env keys are unique | free (`Mapping`) | free (`BTreeMap`) |
 | env insertion order is not observable | **property test**, because `dict` preserves insertion order | free: `BTreeMap` has no insertion order |
 | `outputs` is an Option, not a defaulted list | `Sequence[str] \| None` | `Option<Vec<OutputName>>` |
+| a recursive 7-case sum (a JSON value) | recursive `TypeAlias`, erased | 7-variant `enum`, exhaustively matched |
 | outputs non-empty, names unique, valid | runtime | runtime |
 | fixed-output has exactly one output | runtime | runtime |
 | a derivation's recorded paths match its own hash | runtime (`Corpus::verify`) | runtime (`Corpus::verify`) |
@@ -136,7 +138,7 @@ SPECIFICATION, so it ports rather than being rewritten.
 ```sh
 make -C ../.. rust-test        # cargo test, in a container
 make -C ../.. rust-lint        # rustfmt + clippy -D warnings
-make -C ../.. conformance      # Rust vs Python vs real Nix
+make -C ../.. conformance      # Rust vs Python vs Go vs OCaml vs real Nix
 ```
 
 Docker is the only prerequisite; the toolchain is a pinned image

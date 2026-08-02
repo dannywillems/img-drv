@@ -61,6 +61,7 @@ type error =
   | Reserved_env_keys of string list
   | No_such_output of {drv : string; wanted : string; have : string list}
   | Invalid_hash of string
+  | Untyped_env_needs_structured_attrs of string list
 
 let error_to_string = function
   | Empty_outputs -> "outputs must not be empty"
@@ -82,6 +83,11 @@ let error_to_string = function
         wanted
         (String.concat "; " have)
   | Invalid_hash why -> why
+  | Untyped_env_needs_structured_attrs k ->
+      Printf.sprintf
+        "env values [%s] are not strings; the flat encoding can only carry \
+         strings, so pass ~structured_attrs:true"
+        (String.concat "; " k)
 
 (** A declared result: the derivation's identity comes from this hash.
 
@@ -323,21 +329,31 @@ type build = {
   system : string;
   builder : string;
   args : string list;
-  env : (string * string) list;
+  env : (string * Json.t) list;
+      (** Values are {!Json.t} rather than [string] because
+          [structured_attrs] can carry types. With it off, every value must be
+          a [Json.String]. *)
+  structured_attrs : bool;
+      (** Select the SECOND env encoding ([spec/canonical.md] section 1.8):
+          attributes carried as one [__json] entry with their types preserved,
+          rather than one string-valued variable each. 1223 of 2516 real
+          derivations use it. *)
   outputs : Name.t list option;
   input_drvs : dep list;
   input_srcs : Store_path.t list;
   fixed_output : fixed_output option;
 }
 
-let build ?(args = []) ?(env = []) ?outputs ?(input_drvs = [])
-    ?(input_srcs = []) ?fixed_output ~name ~system ~builder () =
+let build ?(args = []) ?(env = []) ?(structured_attrs = false) ?outputs
+    ?(input_drvs = []) ?(input_srcs = []) ?fixed_output ~name ~system ~builder
+    () =
   {
     name;
     system;
     builder;
     args;
     env;
+    structured_attrs;
     outputs;
     input_drvs;
     input_srcs;
@@ -415,21 +431,60 @@ let derive (b : build) : (drv, error) result =
         let* _, d = resolve f in
         Ok (a, d)
   in
-  let name = Name.to_string b.name in
-  let synthesized =
-    [("name", name); ("system", b.system); ("builder", b.builder)]
-    @ (match b.outputs with
-      | Some _ -> [("outputs", String.concat " " names)]
-      | None -> [])
-    @ (match b.fixed_output with Some f -> fixed_env f | None -> [])
-    (* Placeholders. The real paths are the hash of the derivation that
-       contains them, so they cannot be known until the next step, and the
-       masked form used to compute them blanks these anyway. *)
-    @ List.map (fun n -> (n, "")) names
+  let* () =
+    if b.structured_attrs then Ok ()
+    else
+      match
+        List.filter (fun (_, v) -> not (Json.is_string v)) b.env |> List.map fst
+      with
+      | [] -> Ok ()
+      | untyped ->
+          Error
+            (Untyped_env_needs_structured_attrs
+               (List.sort_uniq String.compare untyped))
   in
+  let name = Name.to_string b.name in
+  (* Placeholders. The real paths are the hash of the derivation that contains
+     them, so they cannot be known until the next step, and the masked form
+     used to compute them blanks these anyway. *)
+  let placeholders = List.map (fun n -> (n, "")) names in
   let env =
-    List.filter (fun (k, _) -> not (List.mem_assoc k synthesized)) b.env
-    @ synthesized
+    if b.structured_attrs then
+      (* One __json entry carrying every attribute WITH ITS TYPE, plus one
+         entry per output. The output paths stay OUTSIDE the JSON, which is why
+         masking needs no special case. See spec/canonical.md 1.8. *)
+      let attrs =
+        b.env
+        @ [
+            ("name", Json.String name);
+            ("system", Json.String b.system);
+            ("builder", Json.String b.builder);
+          ]
+        @ (match b.outputs with
+          | Some _ -> [("outputs", Json.strings names)]
+          | None -> [])
+        @
+        match b.fixed_output with
+        | Some f -> List.map (fun (k, v) -> (k, Json.String v)) (fixed_env f)
+        | None -> []
+      in
+      ("__json", Json.to_string (Json.Object attrs)) :: placeholders
+    else
+      let synthesized =
+        [("name", name); ("system", b.system); ("builder", b.builder)]
+        @ (match b.outputs with
+          | Some _ -> [("outputs", String.concat " " names)]
+          | None -> [])
+        @ (match b.fixed_output with Some f -> fixed_env f | None -> [])
+        @ placeholders
+      in
+      List.filter_map
+        (fun (k, v) ->
+          match v with
+          | Json.String s when not (List.mem_assoc k synthesized) -> Some (k, s)
+          | _ -> None)
+        b.env
+      @ synthesized
   in
   let edges = merge_edges b.input_drvs in
   let draft =

@@ -34,6 +34,7 @@ pub mod corpus;
 pub mod derivation;
 pub mod edsl;
 pub mod examples;
+pub mod json;
 pub mod store;
 
 pub use aterm::{ParseError, Serialize, escape, parse, quote, unparse, unparse_with};
@@ -43,6 +44,7 @@ pub use edsl::{
     Build, Dep, Drv, FixedOutput, HashAlgo, HashMode, InvalidDerivation, canonical, derivation,
     valid_name,
 };
+pub use json::JsonValue;
 pub use store::{
     BASE32_ALPHABET, Base32Error, STORE, base32, base32_decode, base32_length, compress, drv_path,
     fixed_output_input_hash, fixed_output_path, output_paths, output_store_name, sha256_hex,

@@ -71,8 +71,10 @@ func ExampleMany() Drv {
 // ExampleOrdering declares env out of order, to pin that env is sorted by key.
 func ExampleOrdering() Drv {
 	b := exampleBase("ordering")
-	b.Env = map[string]string{
-		"zzz": "last-declared-first", "aaa": "first", "mmm": "middle",
+	b.Env = map[string]JSONValue{
+		"zzz": Str("last-declared-first"),
+		"aaa": Str("first"),
+		"mmm": Str("middle"),
 	}
 	return MustDerive(b)
 }
@@ -99,6 +101,33 @@ func ExampleFixed() Drv {
 	return MustDerive(b)
 }
 
+// ExampleStructured is __structuredAttrs: attributes as JSON, with their types
+// preserved.
+//
+// The flat encoding can only carry strings, so a boolean, an integer, a list or
+// a nested attribute set has to be flattened and re-parsed by the builder. This
+// one keeps them. 1223 of 2516 real derivations use it.
+//
+// It also exercises the same two-orderings rule as ExampleMulti: the outputs
+// tuple comes out sorted (dev, out) while outputs inside the JSON keeps
+// declaration order (out, dev).
+func ExampleStructured() Drv {
+	b := exampleBase("structured")
+	b.Args = []string{"-c", "echo hi > $out"}
+	b.Outputs = Declare("out", "dev")
+	b.StructuredAttrs = true
+	b.Env = map[string]JSONValue{
+		"aFlag":   Bool(true),
+		"aNumber": Int(42),
+		"aList":   Strings("x", "y"),
+		"nested": Object(map[string]JSONValue{
+			"deep": Object(map[string]JSONValue{"deeper": Str("value")}),
+		}),
+		"aString": Str("plain"),
+	}
+	return MustDerive(b)
+}
+
 // CorpusEntry pairs a golden file name with the intent that must reproduce it.
 type CorpusEntry struct {
 	File string
@@ -117,6 +146,7 @@ func ExampleCorpus() []CorpusEntry {
 		{"h3ik45ycljylpdzjssckqi3vvslsbxpn-many.drv", ExampleMany()},
 		{"k1lc1y192xiajlyy4zvsdnfprnjx32i3-dep-a.drv", ExampleDepA()},
 		{"mfdcxzh0v906c5hngb3x0b7sjl130hpk-ordering.drv", ExampleOrdering()},
+		{"sqgix69fbs6hjh5kmf2pb1zvfmi5d0am-structured.drv", ExampleStructured()},
 		{"v27a425rg4n7prwzpyyw0y1fw2ssc46f-multi.drv", ExampleMulti()},
 		{"vk8wqbqg3k8w4134kwa0392kbc1953aq-mmm.drv", ExampleMmm()},
 	}

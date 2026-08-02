@@ -5,8 +5,12 @@ presents. It is deliberately smaller than Nix's language, because it describes
 DERIVATIONS, not a way of computing them.
 
 The constraint from [`../theory.md`](../theory.md) section 1: sorts and
-operations may use only products, finite sums, lists and primitives. Anything
-requiring more is a red flag, and Go is where it will show first.
+operations may use only products, finite sums, lists, primitives, and least
+fixed points of those. Anything requiring more is a red flag, and Go is where
+it shows first.
+
+The "least fixed points" clause is newer than the rest and was forced rather
+than chosen: see `Json` below.
 
 ## Sorts
 
@@ -20,7 +24,9 @@ requiring more is a red flag, and Go is where it will show first.
 | `Derivation` | the term being built | |
 | `DrvRef` | reference to another `Derivation`, plus the outputs needed | a product |
 
-Note what is absent: no functions, no laziness, no recursion, no arithmetic, no
+| `Json` | a JSON value | the one RECURSIVE sort; see below |
+
+Note what is absent: no functions, no laziness, no arithmetic, no
 conditionals. Those belong to the HOST language. The signature describes the
 result of computing, not the computation. This is the whole reason the
 embedding is cheap.
@@ -33,7 +39,8 @@ derivation :
   , system  : System
   , builder : String
   , args    : [String]
-  , env     : [(String, String)]
+  , env     : [(String, Json)]        -- String-valued unless structured
+  , structuredAttrs : Bool            -- selects the second env encoding
   , outputs : Option [OutputName]       -- declaration order is significant,
                                         -- and ABSENT differs from ["out"]
   , inputDrvs : [(DrvRef, [OutputName])]
@@ -42,9 +49,30 @@ derivation :
   -> Derivation
 ```
 
-Everything is a product of primitives and lists of them. `Option` is a
-two-case finite sum, which Go models with a nullable pointer or an explicit
-`present bool` field. Nothing here needs generics.
+with
+
+```
+Json = Null | Bool Bool | Int Int | Float Float | String String
+     | Array [Json] | Object [(String, Json)]
+```
+
+Everything except `Json` is a product of primitives and lists of them.
+`Option` is a two-case finite sum, which Go models with a nullable pointer or
+an explicit `present bool` field. Nothing here needs generics.
+
+`Json` is the exception and it is worth stating plainly: it is the first
+RECURSIVE type in the signature, an inductive datatype rather than a product of
+primitives. It is still first-order and still algebraic, so the Lawvere
+argument in `theory.md` section 1 survives, but the restriction in that section
+now reads "products, finite sums, lists, primitives, and least fixed points of
+those". It is required by `__structuredAttrs` (`canonical.md` section 1.8),
+which 1223 of 2516 real derivations use, so it cannot be avoided by declining
+to support a corner.
+
+`structuredAttrs` is a Bool rather than making `env`'s type depend on it,
+because a type-level dependency is exactly what the signature is not allowed to
+need. When it is false, every `Json` value must be a `String`, checked at
+construction.
 
 ## Invariants
 
@@ -91,6 +119,6 @@ To be enforced by every implementation, and property-tested:
 - [x] The outputs needed belong to the EDGE, not to the reference: depending on
       `dev` alone is common, and two dependents of the same derivation
       routinely need different outputs.
-- [ ] `__structuredAttrs`: the second env encoding (`canonical.md` section
-      1.8), which 1223 of 2516 real derivations use and this signature cannot
-      currently express.
+- [x] `__structuredAttrs`: the second env encoding (`canonical.md` section
+      1.8), which 1223 of 2516 real derivations use. Supported by all four
+      implementations, at the cost of adding the `Json` sort.

@@ -17,8 +17,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use img_drv::{
-    Build, Corpus, Dep, Drv, FixedOutput, HashAlgo, OutputName, Serialize, base32, base32_decode,
-    canonical, derivation, drv_path, parse, sha256_hex, unparse, unparse_with,
+    Build, Corpus, Dep, Drv, FixedOutput, HashAlgo, JsonValue, OutputName, Serialize, base32,
+    base32_decode, canonical, derivation, drv_path, parse, sha256_hex, unparse, unparse_with,
 };
 use proptest::prelude::*;
 
@@ -120,7 +120,12 @@ impl Intent {
             system: self.system.clone(),
             builder: self.builder.clone(),
             args: self.args.clone(),
-            env: self.env.iter().cloned().collect(),
+            env: self
+                .env
+                .iter()
+                .map(|(k, v)| (k.clone(), v.as_str().into()))
+                .collect(),
+            structured_attrs: false,
             outputs: self
                 .outputs
                 .as_ref()
@@ -324,8 +329,10 @@ proptest! {
     /// already rules the failure out, and the test records that claim.
     #[test]
     fn env_has_no_insertion_order_to_observe(i in intents()) {
-        let forward: BTreeMap<String, String> = i.env.iter().cloned().collect();
-        let backward: BTreeMap<String, String> = i.env.iter().rev().cloned().collect();
+        let as_json = |(k, v): &(String, String)| (k.clone(), v.as_str().into());
+        let forward: BTreeMap<String, JsonValue> = i.env.iter().map(as_json).collect();
+        let backward: BTreeMap<String, JsonValue> =
+            i.env.iter().rev().map(as_json).collect();
         prop_assert_eq!(&forward, &backward);
         let build_with = |env| derivation(Build { env, ..i.to_build(vec![]) }).expect("valid");
         prop_assert_eq!(build_with(forward).aterm(), build_with(backward).aterm());

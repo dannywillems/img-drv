@@ -84,8 +84,11 @@ Ordered. The top item is the next thing to do.
 - [x] **`make conformance` across all FOUR implementations**: 10 intents,
       Python, Rust, Go and OCaml, byte-identical to each other and to real Nix.
       This is the phase 2 exit test.
-- [ ] `__structuredAttrs`, without which the eDSL cannot express a modern
-      nixpkgs package.
+- [x] **`__structuredAttrs`**, the second env encoding, in all four
+      implementations. It forces the first RECURSIVE type into the signature,
+      and produced the sharpest typing-table row yet: a seven-case recursive
+      sum is 7 lines in OCaml and Rust, one alias in Python, and ~40 lines plus
+      a representable-but-invalid state in Go.
 
 ---
 
@@ -141,7 +144,7 @@ what make the normalizer honest once the rules have stopped changing.
 - [x] ATerm emitter producing a `.drv`.
 - [x] `ci.yml` running the Python jobs through Makefile targets.
 - [x] `impl/python/README.md`.
-- [ ] The first real-world example (needs `__structuredAttrs`).
+- [ ] The first real-world example.
 - [ ] Hand it to an existing Nix store and build something trivial.
 - [ ] **Differential oracle**: the same package written in the Nix language,
       instantiated with `nix-instantiate`, compared byte-for-byte with ours.
@@ -174,7 +177,6 @@ this kind of claim can be.
       result: a stronger type system removes the checks you make on values you
       CONSTRUCT, and none of the checks on values you COMPUTE.
 - [ ] The six real-world examples, in all four languages, byte-identical.
-      Blocked on `__structuredAttrs`.
 
 Go is the **falsification test**, not a fourth port. It has no sum types, no
 higher-kinded types, minimal generics. If the signature needs more than finite
@@ -451,6 +453,29 @@ Resolved, kept here only so the resolution is findable:
 ---
 
 ## Plan log
+
+- **2026-08-02** `__structuredAttrs` supported in all four implementations, so
+  conformance is now 11 intents rather than 10. The rules were measured before
+  any code was written: the env is exactly `__json` plus one entry per output
+  (456 of 456), the JSON is sorted-compact-unicode (456 of 456), output PATHS
+  stay outside the JSON so the masking rule needs no special case (confirmed by
+  2063 of 2063 recomputed paths), `outputs` inside the JSON follows the same
+  OPTION rule as the flat encoding, and a fixed-output hash moves INSIDE the
+  JSON. A new golden was generated with the pinned Nix rather than written by
+  hand (`scripts/probe-structured.nix`).
+
+  It forces the first RECURSIVE type into the signature. Everything until now
+  was a product of primitives and lists of them; a JSON value is a least fixed
+  point. Still first-order and still algebraic, so `theory.md` section 1
+  survives, but the restriction now reads "and least fixed points of those".
+
+  And it produced the cleanest measurement in the project. Earlier typing-table
+  rows compared how an invariant is CHECKED; this one compares how a TYPE is
+  spelled. Seven-case recursive sum: 7 lines in OCaml and Rust with exhaustive
+  matching, one alias in Python, and in Go a struct with a discriminant plus
+  seven fields plus seven constructors, in which `JSONValue{}` is a
+  representable value of an invalid shape. That is what "no sum types" costs,
+  and it took a recursive sum to make it visible.
 
 - **2026-08-02** Verified against a real, awkward nixpkgs package rather than
   our own examples: `cnijfilter_2_80`, a 32-bit unfree Canon printer driver.

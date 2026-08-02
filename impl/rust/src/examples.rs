@@ -18,6 +18,7 @@ use std::collections::BTreeMap;
 
 use crate::derivation::OutputName;
 use crate::edsl::{Build, Drv, FixedOutput, HashAlgo, derivation};
+use crate::json::JsonValue;
 
 /// Every example targets one system, so the corpus is comparable across
 /// machines: a derivation's store path depends on its system.
@@ -108,9 +109,9 @@ pub fn many() -> Drv {
 pub fn ordering() -> Drv {
     derivation(Build {
         env: BTreeMap::from([
-            ("zzz".to_owned(), "last-declared-first".to_owned()),
-            ("aaa".to_owned(), "first".to_owned()),
-            ("mmm".to_owned(), "middle".to_owned()),
+            ("zzz".to_owned(), "last-declared-first".into()),
+            ("aaa".to_owned(), "first".into()),
+            ("mmm".to_owned(), "middle".into()),
         ]),
         ..base("ordering")
     })
@@ -143,6 +144,38 @@ pub fn fixed() -> Drv {
     .expect("a fixed example is valid")
 }
 
+/// `__structuredAttrs`: attributes as JSON, with their types preserved.
+///
+/// The flat encoding can only carry strings, so a boolean, an integer, a list
+/// or a nested attribute set has to be flattened and re-parsed by the builder.
+/// This one keeps them. 1223 of 2516 real derivations use it.
+///
+/// It also exercises the same two-orderings rule as [`multi`]: the outputs
+/// tuple comes out sorted (`dev`, `out`) while `outputs` inside the JSON keeps
+/// declaration order (`out`, `dev`).
+pub fn structured() -> Drv {
+    derivation(Build {
+        args: vec!["-c".into(), "echo hi > $out".into()],
+        outputs: Some(vec![OutputName::new("out"), OutputName::new("dev")]),
+        structured_attrs: true,
+        env: BTreeMap::from([
+            ("aFlag".to_owned(), JsonValue::Bool(true)),
+            ("aNumber".to_owned(), JsonValue::Int(42)),
+            (
+                "aList".to_owned(),
+                JsonValue::Array(vec!["x".into(), "y".into()]),
+            ),
+            (
+                "nested".to_owned(),
+                JsonValue::object([("deep", JsonValue::object([("deeper", "value")]))]),
+            ),
+            ("aString".to_owned(), "plain".into()),
+        ]),
+        ..base("structured")
+    })
+    .expect("a fixed example is valid")
+}
+
 /// Golden file name, and the intent that must reproduce it byte for byte.
 pub fn corpus() -> Vec<(&'static str, Drv)> {
     vec![
@@ -157,6 +190,10 @@ pub fn corpus() -> Vec<(&'static str, Drv)> {
         ("h3ik45ycljylpdzjssckqi3vvslsbxpn-many.drv", many()),
         ("k1lc1y192xiajlyy4zvsdnfprnjx32i3-dep-a.drv", dep_a()),
         ("mfdcxzh0v906c5hngb3x0b7sjl130hpk-ordering.drv", ordering()),
+        (
+            "sqgix69fbs6hjh5kmf2pb1zvfmi5d0am-structured.drv",
+            structured(),
+        ),
         ("v27a425rg4n7prwzpyyw0y1fw2ssc46f-multi.drv", multi()),
         ("vk8wqbqg3k8w4134kwa0392kbc1953aq-mmm.drv", mmm()),
     ]

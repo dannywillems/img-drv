@@ -323,7 +323,7 @@ let build_intent ?(deps = []) i =
        ~system:i.i_system
        ~builder:i.i_builder
        ~args:i.i_args
-       ~env:i.i_env
+       ~env:(List.map (fun (k, v) -> (k, Json.String v)) i.i_env)
        ?outputs:(Option.map (List.map Examples.name_exn) i.i_outputs)
        ~input_drvs:deps
        ())

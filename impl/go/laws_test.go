@@ -150,11 +150,17 @@ func (Intent) Generate(rnd *rand.Rand, _ int) reflect.Value {
 
 func (i Intent) build(deps ...Dep) Drv {
 	return MustDerive(Build{
-		Name:        i.Name,
-		System:      i.System,
-		Builder:     i.Builder,
-		Args:        i.Args,
-		Env:         i.Env,
+		Name:    i.Name,
+		System:  i.System,
+		Builder: i.Builder,
+		Args:    i.Args,
+		Env: func() map[string]JSONValue {
+			out := map[string]JSONValue{}
+			for k, v := range i.Env {
+				out[k] = Str(v)
+			}
+			return out
+		}(),
 		Outputs:     i.Outputs,
 		InputDrvs:   deps,
 		FixedOutput: i.Fixed,
