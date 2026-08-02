@@ -135,12 +135,33 @@ these gives exactly that, tested rather than reimplemented.
 
 ### Dependencies this implies
 
-`menhir`, `LALRPOP`, `goyacc` and `PLY` are new dependencies and are subject to
-the approval policy in `dependencies.md`. They are the standard, long-lived
-tools of their ecosystems, they are build-time only (each generates source that
-is compiled normally), and none appears in the runtime dependency set of the
-published libraries. `goyacc` in particular is part of `golang.org/x/tools`
-rather than a third-party project.
+**APPROVED 2026-08-02**, and added to the approved list in `dependencies.md`
+along with a Parser Generators section. Audited at approval: zero advisories
+for any of them in the GitHub Advisory Database.
+
+| language | lexer        | parser                     | version           |
+| -------- | ------------ | -------------------------- | ----------------- |
+| OCaml    | `ocamllex`   | `menhir`                   | in `ML_PACKAGES`  |
+| Python   | `ply`        | `ply`                      | 3.11              |
+| Rust     | `logos`      | `lalrpop` + `lalrpop-util` | 0.16.1 / 0.23.1   |
+| Go       | hand-written | `goyacc`                   | `x/tools` v0.29.0 |
+
+The original claim here was that all four are "build-time only ... none appears
+in the runtime dependency set of the published libraries". That turned out to
+be WRONG for one of them, and the correction matters enough to keep rather than
+edit away.
+
+**PLY is a runtime dependency.** It builds its LALR tables when the module is
+imported, because Python has no build step to do it in. So it is an optional
+extra (`img-drv[nix]`) rather than a dependency: the IR core keeps its promise
+of having none, and someone embedding img-drv to emit derivations does not
+inherit a parser generator to do it.
+
+The other three do vanish from the artifact. `menhir` and `LALRPOP` generate
+source that is compiled normally. `goyacc` is stronger still: it is invoked as
+`go run golang.org/x/tools/cmd/goyacc@v0.29.0`, so it never enters `go.mod` at
+all, and the Go library remains literally dependency-free. The cost is that the
+generated parser has to be COMMITTED, which is why `make check-parser` exists.
 
 ## Revisit if
 
