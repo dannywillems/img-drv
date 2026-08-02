@@ -728,11 +728,38 @@ extra rather than a dependency: the IR core promises none, and someone
 embedding img-drv to emit derivations should not inherit a parser generator to
 do it.
 
-**The one that generalises.** Both ports passed the corpus on the FIRST run.
+**Go has no lexer generator, so maximal munch is kept by hand.** This is the
+one place where "use the standard tools" lands on writing the scanner out, and
+the cost is specific: the operator table must be ordered longest-first, and
+`tryURI` must run before identifiers or `x:x` becomes a lambda instead of a
+URI. Neither failure is loud. Both get a comment saying so and the URI one gets
+its own test, because a generator would have made them impossible rather than
+merely tested.
+
+**Go is also the only one whose generated table is COMMITTED.** Go modules have
+no codegen phase, so `grammar.go` is in the repository. That is a real benefit
+(it is the only generated parser here a reviewer can read) with a real cost: an
+edit to `grammar.y` that nobody regenerates still compiles and still parses the
+OLD language. `make check-parser` regenerates and diffs it in CI, and it caught
+a stale checkout the first time it ran.
+
+**The exhaustiveness measurement came due.** Adding the two new AST cases
+(`PathInterp` and the dynamic attribute) was rejected by the Rust compiler and
+by mypy, and accepted silently by Go. Entry 12 predicted exactly this. What Go
+gets instead is a panicking `default` in every type switch, which converts a
+silent wrong answer into a loud one and cannot prevent it.
+
+**The one that generalises.** All three ports passed the corpus on the FIRST
+run.
 That is not evidence they are independently correct, and reading it that way
 would repeat entry 10's mistake. It is evidence that entry 13 did its job:
 turning eight discovered rules into a written specification is what made two
 ports cheap, where the first cost eight rounds of probing. The corpus still
 earns its place, because each implementation is checked against NIX rather than
 against the others, so a rule OCaml has wrong in a way the corpus has not yet
-reached surfaces as one implementation failing rather than as three agreeing.
+reached surfaces as one implementation failing rather than as four agreeing.
+
+That last clause is the whole reason this is not circular, and it is the same
+point as entry 10: four agreeing implementations measure whether a spec was
+transcribed consistently, and only an external oracle measures whether the spec
+is right.
