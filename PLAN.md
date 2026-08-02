@@ -28,10 +28,7 @@ Ordered. The top item is the next thing to do.
    a LIVE oracle for the eDSL rather than only for the parser. The ten golden
    examples already pin the eDSL against real Nix, but they are checked-in
    files; the probe runs against a real `nix-instantiate` on every push.
-3. **`__structuredAttrs`**, the second env encoding, which 1223 of the 2516
-   real derivations in the corpus use (`docs/spec/canonical.md` section 1.8).
-   Until it is specified the eDSL cannot express a modern nixpkgs package.
-4. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
+3. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
    format (`docs/spec/canonical.md` section 3).
 
 ## State
@@ -312,9 +309,13 @@ derivation Nix produces, and no expression that produces one.
 If the IR is genuinely the initial object, the Nix language is another
 presentation of it, and two things follow:
 
-- **A front-end.** Parse the Nix language, evaluate it, emit our IR. OCaml is
-  the natural host: the grammar and the evaluator are what ML was designed for,
-  and the typed reference already lives there.
+- **A front-end.** Parse the Nix language, evaluate it, emit our IR. In ALL
+  FOUR languages, decided in
+  [`decisions/2026-08-02-nix-frontend-build-not-reuse.md`](decisions/2026-08-02-nix-frontend-build-not-reuse.md):
+  Snix's evaluator is GPL-3.0, which would force the combined work to GPL-3.0
+  and reverse the MPL decision, and a single shared evaluator behind four
+  bindings would be ONE implementation with four call sites, so the conformance
+  suite would be comparing it against itself.
 - **Round trips.** Lower the IR back into whichever surface a person prefers.
   From the theory this is not a separate feature: every backend is an algebra,
   and a pretty-printer for language X is the algebra whose carrier is X's
@@ -324,10 +325,23 @@ presentation of it, and two things follow:
 Ordered by what each step buys, so the work can stop at any point and still
 have delivered something:
 
-- [ ] **Lexer and parser for the Nix language**, to a typed AST. Menhir, per
-      AGENTS rule 1: this grammar is far past what recursive descent should be
-      hand-written for. Deliverable on its own: a formatter and a linter.
-- [ ] **Evaluator core**: laziness (thunks and blackholing), attribute sets,
+- [ ] **Lexer and parser for the Nix language**, to a typed AST, in each
+      language, using each language's STANDARD tools, per AGENTS rule 1 and as
+      Nix itself does (Flex plus Bison): `ocamllex`/`menhir`, `LALRPOP`,
+      `goyacc`, `PLY`. A generator REPORTS an ambiguity where a hand-written
+      parser silently picks an associativity, and the `!`-binds-looser-than-`+`
+      trap in `docs/nix-internals.md` is exactly that failure. Deliverable on
+      its own: a formatter and a linter.
+- [ ] **A parser differential oracle.** `nix-instantiate --parse` prints the
+      AST back, fully parenthesized and partly desugared (`1 + 2 * 3` becomes
+      `(1 + (__mul 2 3))`), so it pins tree SHAPE rather than "it parsed". Run
+      each implementation over real nixpkgs `.nix` files and compare byte for
+      byte. Two gotchas: `--parse` does STATIC SCOPE RESOLUTION and rejects
+      free variables, and it prints a DESUGARED tree, so the printer has to
+      reproduce the desugaring.
+- [ ] **Evaluator core**: laziness using each language's STANDARD primitive
+      (`Lazy.t`, `OnceCell`, `sync.Once`, and Python's thunk-and-memo idiom)
+      rather than a hand-rolled one, plus blackholing, attribute sets,
       functions with default and `@`-patterns, `let`/`with`/`rec`, string
       interpolation, and the `builtins` a derivation actually reaches.
 - [ ] **String contexts.** The mechanism by which interpolating a derivation
@@ -354,9 +368,11 @@ Honest caveats, since this is the part most likely to be underestimated:
 - Round trips are only faithful up to the congruence in `theory.md` section 4.
   Expecting the original TEXT back is a category error; saying so up front
   avoids a disappointment later.
-- **Snix already has an evaluator.** Reusing it may beat writing one, and that
-  comparison should be made BEFORE any parser is started. Writing a Nix
-  evaluator because it is interesting is not the same as needing one.
+- ~~**Snix already has an evaluator.**~~ Comparison made and decided against
+  reuse: GPL-3.0 against our MPL-2.0, and one shared evaluator would collapse
+  four implementations into one. See the decision record. The cost of that
+  choice is that this is now four evaluators, and it is accepted with eyes
+  open.
 
 Exit test: `nix-instantiate` and our front-end produce byte-identical `.drv`
 files for the same expression, on a package with a real dependency graph.
@@ -453,6 +469,23 @@ Resolved, kept here only so the resolution is findable:
 ---
 
 ## Plan log
+
+- **2026-08-02** Phase 4's gate resolved: BUILD the Nix front-end, in all four
+  languages, rather than reusing Snix. Two decisive reasons. Snix is GPL-3.0
+  (verified at snix.dev/about), which would force any img-drv library linking
+  it to GPL-3.0 and reverse the MPL-2.0 decision whose entire purpose was that
+  people can embed these libraries; and a single shared Rust evaluator behind
+  four bindings is ONE implementation with four call sites, so the conformance
+  suite would compare it against itself. Snix also states its APIs are not
+  stable. Recorded in
+  `docs/decisions/2026-08-02-nix-frontend-build-not-reuse.md`.
+
+  Found the oracle that makes four parsers tractable: `nix-instantiate --parse`
+  prints the AST back, fully parenthesized and partly desugared, so it pins
+  tree SHAPE and can be run over real nixpkgs files. That buys back what a
+  parser generator's conflict detection would have given, and more, which is
+  what justifies hand-written recursive descent plus Pratt in four languages
+  instead of four different parser generators.
 
 - **2026-08-02** `__structuredAttrs` supported in all four implementations, so
   conformance is now 11 intents rather than 10. The rules were measured before
