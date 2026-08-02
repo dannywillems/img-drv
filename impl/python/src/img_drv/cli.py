@@ -5,6 +5,7 @@
     python -m img_drv canonical <dir>   canonicalizing must change nothing
     python -m img_drv drvpaths <dir>    recompute each .drv's own store path
     python -m img_drv examples <dir>    emit the conformance corpus
+    python -m img_drv transpile <dir>   emit the same corpus as .nix source
 
 All exit non-zero on any failure, which is what makes them usable as CI
 gates. `examples` is what `make conformance` drives: each implementation
@@ -22,6 +23,8 @@ from .aterm import parse, unparse
 from .corpus import Corpus
 from .edsl import canonical
 from .examples import CORPUS
+from .nix.emit import to_nix
+from .nix.transpile_examples import corpus as nix_corpus
 
 
 def verify(directory: pathlib.Path) -> int:
@@ -102,10 +105,27 @@ def drvpaths(directory: pathlib.Path) -> int:
     return 1 if bad else 0
 
 
+def transpile(directory: pathlib.Path) -> int:
+    """Write each intent as a `.nix` expression, for real Nix to instantiate.
+
+    The other half of the commuting square: `examples` emits the IR directly,
+    this emits source that must produce the SAME bytes when Nix evaluates it.
+    Names match the goldens so `scripts/transpile-check.sh` can pair them up.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    written = nix_corpus()
+    for name, expr in written:
+        target = directory / (name.removesuffix(".drv") + ".nix")
+        target.write_text(to_nix(expr) + "\n")
+    print(f"{len(written)} expressions written to {directory}")
+    return 0
+
+
 COMMANDS = {
     "verify": verify,
     "roundtrip": roundtrip,
     "canonical": canonical_check,
+    "transpile": transpile,
     "drvpaths": drvpaths,
     "examples": examples,
 }
