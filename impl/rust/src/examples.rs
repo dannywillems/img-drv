@@ -16,7 +16,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::derivation::OutputName;
+use crate::derivation::{OutputName, StorePath};
 use crate::edsl::{Build, Drv, FixedOutput, HashAlgo, HashMode, derivation};
 use crate::json::JsonValue;
 
@@ -293,4 +293,19 @@ pub fn probe_corpus() -> Vec<Drv> {
         probe_fetched_rec(),
         probe(),
     ]
+}
+
+/// A derivation with a non-empty `inputSrcs`.
+///
+/// The one half of the `.drv` references rule nothing else exercises: a
+/// derivation's own store path lists `inputDrvs` UNION `inputSrcs`, and every
+/// derivation the project could previously build had an empty `inputSrcs`, so
+/// that half was verified only by reading real files.
+pub fn with_src(src: &str) -> Drv {
+    derivation(Build {
+        args: vec!["-c".into(), format!("cat {src} > $out")],
+        input_srcs: vec![StorePath::new(src)],
+        ..base("with-src")
+    })
+    .expect("a fixed example is valid")
 }

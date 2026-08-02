@@ -24,10 +24,10 @@ Ordered. The top item is the next thing to do.
    re-emitted. Parsing is the easy half and is nearly done; the evaluator has
    no `derivation` primop yet, and without one no parsed package can become
    IR. This is where `import`, laziness and string contexts arrive.
-2. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
-   format (`docs/spec/canonical.md` section 3). Now also the one gap in the
-   `.drv` path rule: no derivation we produce has a non-empty `inputSrcs`, so
-   that half of the references set is verified only by reading real files.
+
+Done and no longer on this list: NAR serialization and `inputSrcs`, which was
+the last unspecified corner of the format and the one gap in the `.drv` path
+rule. See the State entry below.
 
 ## State
 
@@ -36,6 +36,13 @@ Ordered. The top item is the next thing to do.
 - [x] Signature drafted (`docs/spec/signature.md`).
 - [x] Serialization derived EMPIRICALLY from real Nix, with golden files
       (`docs/spec/canonical.md`, `docs/spec/examples/`).
+- [x] NAR, in four languages, written as a catamorphism over the filesystem
+      object rather than as a directory walk (`docs/spec/canonical.md` section
+      3, `docs/abstractions.md` entry 17). `make nar-check` diffs five source
+      paths per implementation against a live `nix-store --add`, on a
+      deliberately awkward tree, plus one derivation with a non-empty
+      `inputSrcs` against `nix-instantiate` in BYTES and in path. That closes
+      the half of the `.drv` references rule nothing we could build exercised.
 - [x] An ATerm parser: recursive descent, no regexes. 805 of 805 real nixpkgs
       derivations round-trip BYTE-IDENTICALLY.
 - [x] A real-vector harness: pull random nixpkgs packages, export their .drv

@@ -267,3 +267,20 @@ let probe_corpus () =
     probe_fetched_rec ();
     probe ();
   ]
+
+(** A derivation with a non-empty [inputSrcs].
+
+    The one half of the `.drv` references rule nothing else exercises: a
+    derivation's own store path lists [inputDrvs] UNION [inputSrcs], and every
+    derivation the project could previously build had an empty [inputSrcs], so
+    that half was verified only by reading real files.
+
+    [src] is the store path the source landed at, which {!Img_drv.Nar.source_path}
+    computes from the file itself. *)
+let with_src src =
+  derive_exn
+    (base
+       "with-src"
+       ~args:["-c"; Printf.sprintf "cat %s > $out" src]
+       ~input_srcs:[Store_path.v src]
+       ())

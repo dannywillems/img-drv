@@ -214,8 +214,14 @@ hundred real ones contains it by accident.
       the form that gets HASHED re-sorts the same list by each input's hash.
       A textual substitution preserves path order and so silently breaks every
       derivation with more than one input.
-- [ ] `source` paths: NAR serialization and recursive hashing, needed for
+- [x] `source` paths: NAR serialization and recursive hashing, needed for
       `inputSrcs` computed from local files rather than referenced by path.
+      Settled: the grammar and the three details that decide it are
+      [`canonical.md`](canonical.md) section 3, and `make nar-check` diffs five
+      source paths per implementation against `nix-store --add` plus one
+      derivation with a non-empty `inputSrcs` against `nix-instantiate`. The
+      references rule is SHARED with the `text` kind through Nix's `makeType`,
+      so `source:<ref>:<ref>` and `text:<ref>:<ref>` are one rule, not two.
 - [ ] Whether any of this shifts in newer Nix versions, which is the reason to
       pin the oracle.
 

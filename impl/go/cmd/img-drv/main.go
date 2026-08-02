@@ -10,6 +10,8 @@
 //	img-drv reparse <dir>     parse what we emitted; must be the same tree
 //	img-drv worked <dir>      emit the worked example
 //	img-drv probe <dir>       emit the differential probe
+//	img-drv source <dir>      store paths for a tree, via NAR
+//	img-drv srcdrv <dir>      a derivation with a non-empty inputSrcs
 //
 // All exit non-zero on any failure, which is what makes them usable as CI
 // gates. The subcommands and their output match the Python and Rust
@@ -30,7 +32,7 @@ import (
 
 func main() {
 	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: img-drv [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse|worked|probe] <dir>")
+		fmt.Fprintln(os.Stderr, "usage: img-drv [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse|worked|probe|source|srcdrv] <dir>")
 		os.Exit(2)
 	}
 	command, directory := os.Args[1], os.Args[2]
@@ -61,6 +63,10 @@ func main() {
 		code, err = worked(directory)
 	case "probe":
 		code, err = emitProbe(directory)
+	case "source":
+		code, err = sourcePaths(directory)
+	case "srcdrv":
+		code, err = srcdrv(directory)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", command)
 		os.Exit(2)
@@ -244,6 +250,87 @@ func parsecheck(directory string) (int, error) {
 	if bad > 0 {
 		return 1, nil
 	}
+	return 0, nil
+}
+
+// readFso materialises a real path as an imgdrv.Fso.
+//
+// The package keeps no filesystem code, so the walk lives here. It is
+// deliberately the dull part: everything that decides the BYTES is a pure fold
+// in the library.
+func readFso(path string) (imgdrv.Fso, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(path)
+		if err != nil {
+			return nil, err
+		}
+		return imgdrv.Symlink{Target: target}, nil
+	}
+	if info.IsDir() {
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]imgdrv.DirEntry, 0, len(entries))
+		for _, e := range entries {
+			node, err := readFso(filepath.Join(path, e.Name()))
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, imgdrv.DirEntry{Name: e.Name(), Node: node})
+		}
+		return imgdrv.Directory{Entries: out}, nil
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return imgdrv.Regular{
+		Contents: contents, Executable: info.Mode()&0o111 != 0,
+	}, nil
+}
+
+// sourcePaths prints the store path each entry of a directory would be added
+// at. The differential oracle is nix-store --add.
+func sourcePaths(directory string) (int, error) {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return 0, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		fso, err := readFso(filepath.Join(directory, name))
+		if err != nil {
+			return 0, err
+		}
+		fmt.Printf("%s\t%s\n", name, imgdrv.SourcePath(fso, name, nil))
+	}
+	return 0, nil
+}
+
+// srcdrv emits the derivation that depends on scripts/probe-src.txt.
+//
+// Exercises the whole chain: NAR bytes, their hash, the source store path, the
+// InputSrcs field, and the .drv's own path, which must list the source as a
+// reference.
+func srcdrv(directory string) (int, error) {
+	fso, err := readFso("/w/scripts/probe-src.txt")
+	if err != nil {
+		return 0, err
+	}
+	src := imgdrv.SourcePath(fso, "probe-src.txt", nil)
+	if _, err := imgdrv.WithSrc(string(src)).Write(directory); err != nil {
+		return 0, err
+	}
+	fmt.Printf("source at %s\n", src)
 	return 0, nil
 }
 

@@ -123,6 +123,55 @@ let emit_nix directory =
   Printf.printf "%d expressions written to %s\n" (List.length corpus) directory ;
   0
 
+(** Materialise a real directory as a {!Img_drv.Nar.fso}.
+
+    The library keeps no filesystem dependency, so the walk lives here. This is
+    the only part of NAR that touches [unix], and it is deliberately the dull
+    part: everything that decides the BYTES is a pure fold in the library. *)
+let rec read_fso path =
+  let stat = Unix.lstat path in
+  match stat.Unix.st_kind with
+  | Unix.S_LNK -> Nar.Symlink (Unix.readlink path)
+  | Unix.S_DIR ->
+      Nar.Directory
+        (Sys.readdir path |> Array.to_list
+        |> List.map (fun name -> (name, read_fso (Filename.concat path name))))
+  | _ ->
+      Nar.Regular
+        {
+          executable = stat.Unix.st_perm land 0o111 <> 0;
+          contents = read_file path;
+        }
+
+(** Print the store path each entry of a directory would be added at.
+
+    The differential oracle is [nix-store --add]: real Nix computes the same
+    path from the same bytes, which is what [scripts/nar-check.sh] diffs. *)
+let source_paths directory =
+  Sys.readdir directory |> Array.to_list |> List.sort String.compare
+  |> List.iter (fun name ->
+      let fso = read_fso (Filename.concat directory name) in
+      Printf.printf
+        "%s\t%s\n"
+        name
+        (Types.Store_path.to_string (Nar.source_path ~name fso))) ;
+  0
+
+(** Emit the derivation that depends on [scripts/probe-src.txt].
+
+    Exercises the whole chain: NAR bytes, their hash, the [source] store path,
+    the [inputSrcs] field, and the `.drv`'s own path, which must list the source
+    as a reference. *)
+let emit_srcdrv directory =
+  let file = "/w/scripts/probe-src.txt" in
+  let src =
+    Nar.source_path ~name:"probe-src.txt" (read_fso file)
+    |> Types.Store_path.to_string
+  in
+  ignore (Edsl.write (Examples.with_src src) directory) ;
+  Printf.printf "source at %s\n" src ;
+  0
+
 (** Emit the differential probe's derivations, named as in the store. *)
 let emit_probe directory =
   let corpus = Examples.probe_corpus () in
@@ -350,6 +399,8 @@ let () =
         | "reparse" -> reparse directory
         | "worked" -> emit_worked directory
         | "probe" -> emit_probe directory
+        | "source" -> source_paths directory
+        | "srcdrv" -> emit_srcdrv directory
         | other ->
             Printf.eprintf "unknown command: %s\n" other ;
             exit 2
@@ -358,6 +409,6 @@ let () =
   | _ ->
       prerr_endline
         "usage: img-drv \
-         [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse|worked|probe] \
+         [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse|worked|probe|source|srcdrv] \
          <directory>" ;
       exit 2

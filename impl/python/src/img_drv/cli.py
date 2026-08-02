@@ -10,6 +10,8 @@
     python -m img_drv reparse <dir>     parse what we emitted; must be the same
     python -m img_drv worked <dir>      emit the worked example
     python -m img_drv probe <dir>       emit the differential probe
+    python -m img_drv source <dir>      store paths for a tree, via NAR
+    python -m img_drv srcdrv <dir>      a derivation with a non-empty inputSrcs
 
 All exit non-zero on any failure, which is what makes them usable as CI
 gates. `examples` is what `make conformance` drives: each implementation
@@ -255,6 +257,38 @@ def probe(directory: pathlib.Path) -> int:
     return 0
 
 
+def source(directory: pathlib.Path) -> int:
+    """Print the store path each entry of `directory` would be added at.
+
+    The differential oracle is `nix-store --add`: real Nix computes the same
+    path from the same bytes, so `scripts/nar-check.sh` diffs the two.
+    """
+    from .nar import read_fso, source_path  # noqa: PLC0415
+
+    for entry in sorted(directory.iterdir(), key=lambda p: p.name.encode()):
+        print(f"{entry.name}\t{source_path(read_fso(entry), entry.name)}")
+    return 0
+
+
+def srcdrv(directory: pathlib.Path) -> int:
+    """Emit the derivation that depends on `scripts/probe-src.txt`.
+
+    The source's store path is computed by our own NAR code, so this exercises
+    the whole chain: NAR bytes, their hash, the `source` store path, the
+    `inputSrcs` field, and the `.drv`'s own path, which must list the source as
+    a reference.
+    """
+    from .examples import with_src  # noqa: PLC0415
+    from .nar import read_fso, source_path  # noqa: PLC0415
+
+    here = pathlib.Path(__file__).resolve().parents[4] / "scripts"
+    file = here / "probe-src.txt"
+    src = source_path(read_fso(file), file.name)
+    with_src(str(src)).write(directory)
+    print(f"source at {src}")
+    return 0
+
+
 COMMANDS = {
     "verify": verify,
     "roundtrip": roundtrip,
@@ -264,6 +298,8 @@ COMMANDS = {
     "reparse": reparse,
     "worked": worked,
     "probe": probe,
+    "source": source,
+    "srcdrv": srcdrv,
     "drvpaths": drvpaths,
     "examples": examples,
 }

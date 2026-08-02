@@ -113,6 +113,7 @@ real Nix.
 | `make transpile-check` | our `.nix`, through real Nix, gives the golden `.drv` | **44 of 44**                  |
 | `make nixpkgs-parse`   | our parse tree equals `nix-instantiate --parse`       | **all four languages**        |
 | `make differential`    | a live closure's paths, against pinned Nix            | **7 of 7**                    |
+| `make nar-check`       | source paths via our own NAR, vs `nix-store --add`     | **5 of 5 x 4**                |
 
 Both arrows between the Nix language and its syntax tree now exist, in all four
 languages. The arrow from that tree to the IR does NOT: there is no

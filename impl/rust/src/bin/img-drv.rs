@@ -10,6 +10,8 @@
 //! img-drv reparse <dir>     parse what we emitted; must be the same tree
 //! img-drv worked <dir>      emit the worked example
 //! img-drv probe <dir>       emit the differential probe
+//! img-drv source <dir>      store paths for a tree, via NAR
+//! img-drv srcdrv <dir>      a derivation with a non-empty inputSrcs
 //! ```
 //!
 //! All exit non-zero on any failure, which is what makes them usable as CI
@@ -27,7 +29,7 @@ fn main() -> ExitCode {
     let [command, directory] = args.as_slice() else {
         eprintln!(
             "usage: img-drv \
-             [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse|worked|probe] <dir>"
+             [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse|worked|probe|source|srcdrv] <dir>"
         );
         return ExitCode::from(2);
     };
@@ -46,6 +48,8 @@ fn main() -> ExitCode {
         "reparse" => reparse(&directory),
         "worked" => worked(&directory),
         "probe" => emit_probe(&directory),
+        "source" => source_paths(&directory),
+        "srcdrv" => srcdrv(&directory),
         other => {
             eprintln!("unknown command: {other}");
             return ExitCode::from(2);
@@ -325,5 +329,69 @@ fn emit_probe(directory: &Path) -> Outcome {
         d.write(directory)?;
     }
     println!("{} probe derivations written", corpus.len());
+    Ok(0)
+}
+
+/// Materialise a real path as an [`img_drv::nar::Fso`].
+///
+/// The crate keeps no filesystem code, so the walk lives here. It is
+/// deliberately the dull part: everything that decides the BYTES is a pure fold
+/// in the library.
+fn read_fso(path: &Path) -> std::io::Result<img_drv::nar::Fso> {
+    use img_drv::nar::Fso;
+    let meta = std::fs::symlink_metadata(path)?;
+    if meta.file_type().is_symlink() {
+        let target = std::fs::read_link(path)?;
+        return Ok(Fso::Symlink(target.display().to_string()));
+    }
+    if meta.is_dir() {
+        let mut entries: Vec<(String, Fso)> = Vec::new();
+        for e in std::fs::read_dir(path)? {
+            let e = e?;
+            let name = e.file_name().to_string_lossy().into_owned();
+            entries.push((name, read_fso(&e.path())?));
+        }
+        return Ok(Fso::Directory(entries));
+    }
+    #[cfg(unix)]
+    let executable = {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 != 0
+    };
+    #[cfg(not(unix))]
+    let executable = false;
+    Ok(Fso::Regular {
+        contents: std::fs::read(path)?,
+        executable,
+    })
+}
+
+/// Print the store path each entry of a directory would be added at.
+///
+/// The differential oracle is `nix-store --add`, diffed by
+/// `scripts/nar-check.sh`.
+fn source_paths(directory: &Path) -> Outcome {
+    let mut names: Vec<String> = std::fs::read_dir(directory)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
+    for name in names {
+        let fso = read_fso(&directory.join(&name))?;
+        println!("{name}\t{}", img_drv::nar::source_path(&fso, &name, &[]));
+    }
+    Ok(0)
+}
+
+/// Emit the derivation that depends on `scripts/probe-src.txt`.
+///
+/// Exercises the whole chain: NAR bytes, their hash, the `source` store path,
+/// the `inputSrcs` field, and the `.drv`'s own path, which must list the source
+/// as a reference.
+fn srcdrv(directory: &Path) -> Outcome {
+    let file = Path::new("/w/scripts/probe-src.txt");
+    let src = img_drv::nar::source_path(&read_fso(file)?, "probe-src.txt", &[]);
+    img_drv::examples::with_src(src.as_ref()).write(directory)?;
+    println!("source at {src}");
     Ok(0)
 }

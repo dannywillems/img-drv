@@ -869,3 +869,73 @@ contains that string.
 oracle, not the oracle. Prefer a gate that RE-ASKS. When re-asking is
 expensive, pin the oracle so the photograph is at least reproducible, and be
 explicit that the pin buys reproducibility and not currency.
+
+## 17. NAR is a catamorphism, and canonical means forgetful
+
+**Structure:** initial algebra and the unique homomorphism out of it, plus a
+quotient. `docs/spec/canonical.md` section 3 is the specification;
+`impl/*/nar.*` is the implementation in four languages.
+
+A filesystem object is the initial algebra of the functor
+
+```
+F(X) = (contents x executable) + target + (name x X)*
+```
+
+so the three constructors ARE the three cases of that sum, and any function out
+of it that is defined by structural recursion is a CATAMORPHISM: the unique
+`F`-algebra homomorphism from the initial algebra into the carrier you pick.
+Pick bytes with concatenation and you get NAR. Pick a hash and you get, up to
+one extra step, the store path.
+
+The uniqueness clause is the part that pays. There is exactly one homomorphism
+out of an initial algebra into a given algebra, so once the three cases are
+fixed there is no freedom left. That is why all four implementations could be
+written from the grammar alone and agreed with `nix-store --add` on the first
+run, in contrast with the parser, which took eight bug classes to converge.
+A catamorphism has nothing to disagree about; a parser has a whole grammar's
+worth.
+
+**Canonical means forgetful, and forgetful is a quotient.** NAR keeps content,
+one permission bit, and names. It drops mtimes, ownership, inode order, and
+every other permission. Read as a map, it is `U : FS -> Fso` forgetting
+structure, and the store is indexed by the quotient `FS / ker(nar . U)`. Two
+trees that differ only in what was forgotten are the SAME store object.
+
+That is not a convenience. It is the property that makes a binary cache work:
+if the archive kept mtimes, two builds of identical content would hash
+differently, every cache would miss, and content-addressing would name
+timestamps rather than content. So the deletions are the specification, and an
+implementation that helpfully preserved a permission bit would be WRONG in the
+strong sense, not merely different.
+
+**Where the freedom actually lives.** If the fold has no freedom, where do bugs
+come from? From the three places the grammar under-determines an implementer
+who is not reading carefully:
+
+- the ORDER of directory entries (byte-wise, not locale), which is a choice
+  about which total order on names the fold traverses;
+- the ENCODING of the executable bit (a present-or-absent field, not a value),
+  which is a choice about the shape of the `Regular` case;
+- the PADDING at exactly a multiple of eight (nothing, not a block), which is
+  an off-by-one in `str` and not in the fold at all.
+
+All three are invisible on a representative tree. So the harness builds an
+UNrepresentative one: an empty file, a payload aligned to eight, an executable,
+a nested directory, a symlink, and the pair `Zed`/`apple` whose byte order and
+locale order disagree. This is the boundary-derivation habit of
+`audit-boundary-totality`, applied to a format rather than to a function: read
+the carrier, enumerate its boundaries, and construct the input that
+distinguishes the readings.
+
+**And it closed the last open half of a rule.** A `.drv`'s own path lists its
+`inputDrvs` UNION its `inputSrcs`. Every derivation the project could build
+before this had an EMPTY `inputSrcs`, so half of that rule was verified only by
+reading real files, never by producing one. `make nar-check` produces one:
+NAR bytes, their hash, the `source` path, the `inputSrcs` field, and the
+`.drv`'s own path, matched against `nix-instantiate` in bytes and in path.
+
+**To learn more:** Meijer, Fokkinga and Paterson, *Functional Programming with
+Bananas, Lenses, Envelopes and Barbed Wire* (FPCA 1991) for catamorphisms and
+the uniqueness argument; Dolstra, *The Purely Functional Software Deployment
+Model* (2006), figure 5.2, for the NAR grammar itself.

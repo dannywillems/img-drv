@@ -134,6 +134,26 @@ jobs:
       # that already passed 59 hand-written vectors.
       - run: make nixpkgs-parse N=300 IMPLS='ocaml python rust go'
 
+  nar-check:
+    name: NAR, and a derivation with inputSrcs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # The last unspecified corner of the format, and the one half of the .drv
+      # references rule nothing else could exercise: every derivation the other
+      # jobs build has an EMPTY inputSrcs, so "the path lists inputDrvs UNION
+      # inputSrcs" was verified on one side only.
+      #
+      # Two oracles, because the second subsumes the first only if the first
+      # holds: `nix-store --add` on a deliberately awkward tree (empty file,
+      # a payload already aligned to eight, an executable, a nested directory,
+      # a symlink, and two names that sort differently by byte than by locale),
+      # then a derivation whose inputSrcs is one of those paths, required to
+      # match nix-instantiate in BYTES and in its own store path.
+      - run: make nar-check
+
   worked-example:
     name: a real package through the surface
     runs-on: ubuntu-latest

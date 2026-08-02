@@ -255,3 +255,23 @@ def probe_corpus() -> list[Drv]:
         probe_fetched_rec(),
         probe(),
     ]
+
+
+def with_src(src: str) -> Drv:
+    """A derivation with a non-empty ``inputSrcs``.
+
+    The one half of the `.drv` references rule nothing else exercises: a
+    derivation's own store path lists ``inputDrvs`` UNION ``inputSrcs``, and
+    every derivation the project could previously build had an empty
+    ``inputSrcs``, so that half was verified only by reading real files.
+
+    ``src`` is the store path the source landed at, which
+    :func:`img_drv.nar.source_path` computes from the file itself.
+    """
+    return derivation(
+        name="with-src",
+        system=SYSTEM,
+        builder=SH,
+        args=["-c", f"cat {src} > $out"],
+        input_srcs=[src],
+    )

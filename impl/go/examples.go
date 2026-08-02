@@ -234,3 +234,16 @@ func ProbeCorpus() []Drv {
 		Probe(),
 	}
 }
+
+// WithSrc is a derivation with a non-empty InputSrcs.
+//
+// The one half of the .drv references rule nothing else exercises: a
+// derivation's own store path lists InputDrvs UNION InputSrcs, and every
+// derivation the project could previously build had an empty InputSrcs, so that
+// half was verified only by reading real files.
+func WithSrc(src string) Drv {
+	b := exampleBase("with-src")
+	b.Args = []string{"-c", fmt.Sprintf("cat %s > $out", src)}
+	b.InputSrcs = []StorePath{StorePath(src)}
+	return MustDerive(b)
+}

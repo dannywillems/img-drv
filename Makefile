@@ -117,6 +117,10 @@ canonical-check: ## Canonicalizing a real derivation must change nothing
 corpus: ## Pull N random nixpkgs packages and verify against them (needs docker)
 	./scripts/fetch-corpus.sh $(N)
 
+.PHONY: nar-check
+nar-check: ## Source store paths, via our own NAR, vs nix-store --add
+	./scripts/nar-check.sh $(IMPLS)
+
 .PHONY: worked-example
 worked-example: ## A real package through the surface, vs hand-written Nix
 	./scripts/worked-example.sh $(IMPLS)

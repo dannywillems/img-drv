@@ -35,6 +35,7 @@ pub mod derivation;
 pub mod edsl;
 pub mod examples;
 pub mod json;
+pub mod nar;
 pub mod nix;
 pub mod store;
 

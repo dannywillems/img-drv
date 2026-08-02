@@ -238,17 +238,99 @@ implementation that escapes control characters generally (as JSON does, with
 OPEN: whether non-UTF-8 byte sequences are permitted in values, and whether
 they round-trip.
 
-## 3. What is NOT yet specified
+## 3. NAR: the serialization of a source
+
+`inputSrcs` above is a list of store paths. Where do those paths come from when
+the source is a local file rather than a path someone typed? From **NAR**, the
+Nix Archive format: a canonical serialization of a filesystem object, hashed
+with sha256, fed into the `source` kind of
+[`store-paths.md`](store-paths.md).
+
+```
+source_path(fso, name) = store_path("source", sha256(nar(fso)), name)
+```
+
+### 3.1 The grammar
+
+From the Nix thesis (Dolstra 2006, figure 5.2):
+
+```
+serialise(fso)  = str("nix-archive-1") ++ node(fso)
+node(fso)       = str("(") ++ body(fso) ++ str(")")
+
+body(Regular)   = str("type") str("regular")
+                  [ str("executable") str("") ]
+                  str("contents") str(contents)
+body(Symlink)   = str("type") str("symlink") str("target") str(target)
+body(Directory) = str("type") str("directory") entry*
+
+entry           = str("entry") str("(") str("name") str(name)
+                  str("node") node str(")")
+
+str(s)          = int(len s) ++ s ++ zero padding to a multiple of 8
+int(n)          = 8 bytes, little endian
+```
+
+### 3.2 The three details that decide correctness
+
+All three are invisible in a happy-path test, which is why the harness builds a
+deliberately awkward tree rather than a representative one.
+
+- **Directory entries sort BYTE-wise, not by locale.** `Zed` precedes `apple`
+  by byte and follows it under most collations. A locale-aware sort produces a
+  different archive, and therefore a different store path, for the same
+  directory.
+- **The executable bit is the only permission kept, and it is encoded as the
+  PRESENCE of a field**, not as a value. There is no `executable false`.
+- **Padding to eight adds NOTHING when the length is already a multiple of
+  eight**, rather than a full block. A payload of exactly 8 or 16 bytes is the
+  case that distinguishes the two readings.
+
+What is ABSENT is the point: mtimes, ownership, and every other permission bit.
+NAR does not discard them as an optimisation. A format that kept them could not
+be canonical, and a store keyed by a non-canonical hash would miss on identical
+content.
+
+### 3.3 It is a fold, not a walk
+
+A filesystem object is the initial algebra of
+
+```
+F(X) = (contents x executable) + target + (name x X)*
+```
+
+and NAR is the unique homomorphism out of it: a catamorphism. All four
+implementations are written that way, taking a TREE rather than a path, so the
+serializer is testable without a filesystem and the filesystem walk stays in
+the CLI where it cannot affect the bytes.
+
+### 3.4 References
+
+A source that refers to other store paths takes the same treatment as a `.drv`:
+the kind becomes `source:<ref>:<ref>:...` with the references sorted and joined
+with colons. That is `makeType` in Nix, shared between the `text` and `source`
+kinds, which is why one bug in that rule was two bugs.
+
+### 3.5 Verified
+
+`make nar-check`, all four implementations, against a live oracle:
+
+- five source paths on an awkward tree (an empty file, a payload aligned to
+  eight, an executable, a nested directory, a symlink, and the `Zed`/`apple`
+  pair) match `nix-store --add`;
+- a derivation with a non-empty `inputSrcs` matches `nix-instantiate` in both
+  its BYTES and its own store path, which is the first check to exercise the
+  `inputSrcs` half of the `.drv` references rule.
+
+## 4. What is NOT yet specified
 
 Store path computation, which used to be the blocker here, is solved and
 verified: see [`store-paths.md`](store-paths.md). The sort order of `inputDrvs`
-and `inputSrcs` is now measured rather than open (sections 1.2 and 1.3). What
-remains open:
+and `inputSrcs` is now measured rather than open (sections 1.2 and 1.3), and
+NAR is specified and verified (section 3). What remains open:
 
 - `__structuredAttrs`, the second env encoding, used by 1223 of the 2516 real
   derivations in the corpus (section 1.8);
-- NAR serialization, needed for `inputSrcs` computed from local files rather
-  than referenced by path;
 - whether non-UTF-8 byte sequences are permitted in values, and round-trip.
 
 The failure this section exists to prevent has not changed: an implementation
@@ -256,7 +338,7 @@ can emit a derivation whose SHAPE is right and whose PATHS are wrong, which is
 worse than useless because it looks correct. `make differential` is what
 catches it.
 
-## 4. Reproducing the probes
+## 5. Reproducing the probes
 
 The probe is checked in as [`../../scripts/probe.nix`](../../scripts/probe.nix)
 and run by `make differential` against the pinned oracle. Ad hoc:
@@ -279,7 +361,7 @@ Measured rather than assumed: Nix 2.34.8 and 2.35.1 emit byte-identical
 derivations for a probe exercising multiple outputs, a dependency edge and
 unsorted env keys. So the format is stable across at least one minor release.
 
-## 5. Consequences for implementations
+## 6. Consequences for implementations
 
 From [`../theory.md`](../theory.md) section 4, canonical serialization is the
 well-definedness proof, so these are obligations rather than style:
