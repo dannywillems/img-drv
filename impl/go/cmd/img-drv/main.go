@@ -5,6 +5,7 @@
 //	img-drv roundtrip <dir>   parse then re-serialize, byte for byte
 //	img-drv canonical <dir>   canonicalizing must change nothing
 //	img-drv examples <dir>    emit the conformance corpus
+//	img-drv transpile <dir>   emit the same corpus as .nix source
 //
 // All exit non-zero on any failure, which is what makes them usable as CI
 // gates. The subcommands and their output match the Python and Rust
@@ -19,15 +20,16 @@ import (
 	"strings"
 
 	imgdrv "github.com/dannywillems/img-drv/impl/go"
+	"github.com/dannywillems/img-drv/impl/go/nix"
 )
 
 func main() {
 	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: img-drv [verify|roundtrip|canonical|examples] <directory>")
+		fmt.Fprintln(os.Stderr, "usage: img-drv [verify|roundtrip|canonical|examples|transpile] <directory>")
 		os.Exit(2)
 	}
 	command, directory := os.Args[1], os.Args[2]
-	if command != "examples" {
+	if command != "examples" && command != "transpile" {
 		if info, err := os.Stat(directory); err != nil || !info.IsDir() {
 			fmt.Fprintf(os.Stderr, "not a directory: %s\n", directory)
 			os.Exit(2)
@@ -44,6 +46,8 @@ func main() {
 		code, err = canonicalCheck(directory)
 	case "examples":
 		code, err = emitExamples(directory)
+	case "transpile":
+		code, err = transpile(directory)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", command)
 		os.Exit(2)
@@ -140,6 +144,29 @@ func emitExamples(directory string) (int, error) {
 		}
 	}
 	fmt.Printf("%d derivations written to %s\n", len(corpus), directory)
+	return 0, nil
+}
+
+// transpile writes each intent as a .nix expression, for real Nix to
+// instantiate.
+//
+// The other half of the commuting square: examples emits the IR directly, this
+// emits source that must produce the SAME bytes when Nix evaluates it. Names
+// match the goldens so scripts/transpile-check.sh can pair them up.
+func transpile(directory string) (int, error) {
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return 0, err
+	}
+	corpus := nix.Corpus()
+	for _, e := range corpus {
+		name := strings.TrimSuffix(e.Name, ".drv") + ".nix"
+		target := filepath.Join(directory, name)
+		body := nix.ToNix(e.Expr) + "\n"
+		if err := os.WriteFile(target, []byte(body), 0o644); err != nil {
+			return 0, err
+		}
+	}
+	fmt.Printf("%d expressions written to %s\n", len(corpus), directory)
 	return 0, nil
 }
 

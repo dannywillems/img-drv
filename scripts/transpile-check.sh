@@ -29,7 +29,7 @@
 # makes this check STRONGER than a source diff rather than weaker, because it
 # compares meaning instead of spelling.
 #
-# Usage: ./scripts/transpile-check.sh [impl ...]     (default: all with a transpiler)
+# Usage: ./scripts/transpile-check.sh [impl ...]     (default: all four)
 
 set -euo pipefail
 
@@ -41,7 +41,7 @@ GOLDEN="$REPO/docs/spec/examples"
 . "$HERE/pins.env"
 
 if [ "$#" -eq 0 ]; then
-  set -- ocaml python
+  set -- ocaml python rust go
 fi
 
 # A case rather than an associative array: macOS ships bash 3.2, which has

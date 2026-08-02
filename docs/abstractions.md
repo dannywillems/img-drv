@@ -565,3 +565,60 @@ consistently. Only an external oracle measures whether the spec is correct. So
 the count of languages is a measure of PORTABILITY, never of CORRECTNESS, and
 the two obligations have to stay separate: `make conformance` for the first,
 `make transpile-check` against real Nix for the second.
+
+## 12. Go has TWO encodings of a sum, and we picked the worse one first
+
+**Structure:** the same coproduct, encoded two ways in a language with no
+coproducts, and what each encoding makes unrepresentable.
+
+Entry 9 measured `JSONValue`, a 7-case sum, and concluded that Go's cost was "a
+struct with a discriminant and one field per case, plus a constructor per
+case", whose defect is that `JSONValue{}` is a representable value of an
+invalid shape: `Kind` and the payload fields can disagree.
+
+The Nix AST is a **21-case** sum, and at that width the discriminant struct is
+not merely verbose, it is untenable: 21 mostly-nil fields on every node. So the
+Go port used Go's OTHER sum encoding, the **sealed interface**: an interface
+with an unexported marker method, which only types in the defining package can
+implement.
+
+**The finding is that the sealed interface was available at 7 cases too, and is
+strictly better there.** It costs one method per case instead of a field per
+case, and it makes Kind-disagrees-with-payload unrepresentable, which was
+precisely the defect entry 9 attributed to Go itself. Some of what that entry
+charged to the language was actually the cost of the encoding we chose. The
+honest correction:
+
+| property                           | discriminant struct | sealed interface | OCaml/Rust variant |
+| ---------------------------------- | ------------------- | ---------------- | ------------------ |
+| invalid combinations representable | **yes**             | no               | no                 |
+| a zero value that is not any case  | `JSONValue{}`       | `nil`            | none               |
+| exhaustiveness checked             | no                  | no               | **yes**            |
+| lines for N cases                  | N fields + N ctors  | N marker methods | N                  |
+
+So Go's real gap from a variant is TWO things and not three: no exhaustiveness
+checking, and a `nil` inhabitant. Both cost the compiler's help; neither costs
+expressiveness. Every type switch in `impl/go/nix/` therefore ends in a
+panicking default, which converts a silent wrong answer into a loud one and
+cannot prevent it.
+
+**Why the bigger type was needed to see this.** At 7 cases both encodings are
+writable and the discriminant struct looks like the more explicit one. At 21
+only one is writable at all, and having written it, the comparison at 7 becomes
+obvious. That is the general reason to keep pushing a signature until something
+breaks: `theory.md` section 1 restricted the IR to finite products precisely so
+Go would not be strained, and every subsequent widening (a recursive sum in
+entry 9, a second-order theory here) has paid for itself in what it revealed.
+
+**Left undone deliberately.** `impl/go/json.go` still uses the discriminant
+struct. Changing it is a breaking change to the Go library's public API for a
+type verified across 2063 output paths, so it is a decision to take
+explicitly rather than a cleanup to slip into a port. Recorded in `PLAN.md`.
+
+**A second, smaller measurement from the same port.** The fresh-name supply is
+ambient package state in OCaml, Python and Go, and cannot be in Rust: a mutable
+`static` needs `unsafe`, so it is a `Cell` in thread-local storage. This is the
+first time the typing axis has said something about a RUNTIME property (the
+surface is stateful and not safe to share between threads) rather than about
+which invalid values are representable. Rust does not make the surface
+thread-safe; it makes the thread-unsafety impossible to leave undeclared.

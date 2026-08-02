@@ -20,17 +20,17 @@ How it is used:
 
 Ordered. The top item is the next thing to do.
 
-1. **The transpiler in the other three languages.** OCaml closes the commuting
-   square on 11 of 11 intents; Python, Rust and Go have no `emit`/`surface`
-   yet. Porting `surface` first is the right order: it is HOAS plus a fresh
-   supply plus the overlay monoid, it needs only functions and records, and it
-   is where the "same composability in four languages" claim is actually
-   tested. `make transpile-check` extends to each as it lands.
-2. **`compose/`: overlays as mixins, in all four languages.** The monoid
-   (`compose`, identity, `fix`) exists in `impl/ocaml/nix/surface.ml` and is
-   the honest answer to "a trait/signature/abstract class describing a Nix
-   expression". Exit test: an overlay written in each language composes with
-   one written in another via the emitted `.nix`, and the square still closes.
+1. **A worked example that is not a conformance intent.** The transpiler is
+   proved on eleven derivations nobody would write by hand. The next thing it
+   has to survive is one real package expressed through `surface` in each
+   language, with an overlay applied, instantiated against a pinned nixpkgs.
+   That is where the surface's ergonomics get their first honest test.
+2. **Decide the `JSONValue` encoding in Go.** `docs/abstractions.md` entry 12
+   found that the sealed interface used by `impl/go/nix/` is strictly better
+   than the discriminant struct used by `impl/go/json.go`, and was available
+   there too. Changing it is a BREAKING change to the Go library's public API
+   for a type verified across 2063 output paths, so it needs a decision, not a
+   drive-by cleanup.
 3. **A Nix EXPRESSION front-end**, so a real nixpkgs package can be read and
    not merely re-emitted. OCaml's parser is done; the evaluator handles enough
    for the square but has no `derivation` primop yet.
@@ -59,11 +59,16 @@ Ordered. The top item is the next thing to do.
       paths recomputed from the files' own bytes. The `.drv` path rule was
       WRONG until the transpiler found it (references were omitted); see
       `docs/abstractions.md` entry 10.
-- [x] **The commuting square closes.** `make transpile-check`: 11 of 11 intents
+- [x] **The commuting square closes, in all four languages.**
+      `make transpile-check`: 44 of 44 (11 intents times 4 implementations)
       printed to `.nix`, instantiated by real Nix, reproduce the golden `.drv`.
       This is the first oracle in the project where NIX chooses the answer
       rather than validating one we chose, and it found a bug four green gates
       had missed.
+- [x] **The transpiler in all four languages**: `ast`, `emit`, `surface` and
+      the overlay monoid, with the one-way dependency on the IR that
+      `docs/architecture.md` requires. No parser generator is a dependency of
+      any of them, because the transpiler is only the arrow `EXPR -> .nix`.
 - [x] CI: GitHub Actions, SHA-pinned, every job through a Makefile target.
 - [x] Oracle pinned by DIGEST (`scripts/pins.env`), with byte-stability
       measured across two Nix releases rather than assumed.
@@ -493,6 +498,15 @@ Resolved, kept here only so the resolution is findable:
 ---
 
 ## Plan log
+
+- **2026-08-02** The transpiler landed in all four languages and the commuting
+  square closes 44 of 44. Two measurements came out of the ports. Emitted
+  `.nix` is NOT comparable across languages, because a HOAS binder has no name
+  until the surface invents one and the host's evaluation order decides which
+  representative of the alpha-class you get; equality belongs at the IR, which
+  is also what makes conformance linear in the number of languages. And Go has
+  two encodings of a sum, of which `impl/go/json.go` picked the worse one;
+  `docs/abstractions.md` entry 12 corrects entry 9 accordingly.
 
 - **2026-08-02** The commuting square closed on 11 of 11 intents, and failed 10
   of 11 on its first run. The cause was ours: a `.drv` store path's fingerprint
