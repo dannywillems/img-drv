@@ -133,3 +133,17 @@ jobs:
       # It found eight distinct bug classes on its first run, against a parser
       # that already passed 59 hand-written vectors.
       - run: make nixpkgs-parse N=300 IMPLS='ocaml python rust go'
+
+  worked-example:
+    name: a real package through the surface
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # The eleven conformance intents pin the SERIALIZATION and are
+      # derivations nobody would write. This pins the SURFACE: one real
+      # package, with stdenv, a nixpkgs dependency, an overlay and a fixed
+      # point, required to instantiate to the same store path as the
+      # hand-written Nix beside it.
+      - run: make worked-example

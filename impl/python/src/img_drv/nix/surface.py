@@ -49,6 +49,7 @@ __all__ = [
     "rec_attrs",
     "reset",
     "select",
+    "spath",
     "str_",
     "to_nix",
     "update",
@@ -88,6 +89,15 @@ def str_(s: str) -> ast.Expr:
 
 def path(p: str) -> ast.Expr:
     return ast.Path(p)
+
+
+def spath(p: str) -> ast.Expr:
+    """``<nixpkgs>``, a search-path lookup.
+
+    Impure: it reads NIX_PATH when evaluated, which is why a reproducible
+    caller pins it.
+    """
+    return ast.SearchPath(p)
 
 
 def var(x: str) -> ast.Expr:
@@ -260,11 +270,23 @@ def compose_all(overlays: Iterable[Overlay]) -> Overlay:
 def fix(base: ast.Expr, o: Overlay) -> ast.Expr:
     """Close an overlay into a package set with the knot tied.
 
-    Emits ``(let final = base // (overlay final base); in final)``: the fixed
-    point is written OUT in Nix rather than computed here, because the point of
-    a transpiler is that the output does the work.
+    Emits ``(let base = ...; final = base // (overlay final base); in final)``:
+    the fixed point is written OUT in Nix rather than computed here, because
+    the point of a transpiler is that the output does the work.
+
+    `base` is BOUND, not inlined. `fix` passes it to the overlay as `prev` as
+    well as using it on the left of `//`, so inlining it would duplicate the
+    whole expression into the output, once per mention. The hand-written Nix a
+    reader would compare against binds it too.
     """
+    b = _fresh("base")
     n = _fresh("final")
     return ast.Let(
-        (ast.Bind((ast.Id(n),), update(base, o(ast.Var(n), base))),), ast.Var(n)
+        (
+            ast.Bind((ast.Id(b),), base),
+            ast.Bind(
+                (ast.Id(n),), update(ast.Var(b), o(ast.Var(n), ast.Var(b)))
+            ),
+        ),
+        ast.Var(n),
     )

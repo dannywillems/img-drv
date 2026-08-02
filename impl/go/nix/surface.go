@@ -66,6 +66,12 @@ func S(s string) Expr { return Str{Parts: []Part{Lit{Text: s}}} }
 // Path is a path literal.
 func Path(p string) Expr { return PathLit{Text: p} }
 
+// SPath is <nixpkgs>, a search-path lookup.
+//
+// Impure: it reads NIX_PATH when evaluated, which is why a reproducible caller
+// pins it.
+func SPath(p string) Expr { return SearchPath{Text: p} }
+
 // V is a variable reference.
 func V(x string) Expr { return Var{Name: x} }
 
@@ -248,14 +254,26 @@ func ComposeAll(overlays ...Overlay) Overlay {
 
 // Fix closes an overlay into a package set with the knot tied.
 //
-// Emits (let final = base // (overlay final base); in final): the fixed point
-// is written OUT in Nix rather than computed here, because the point of a
-// transpiler is that the output does the work.
+// Emits (let base = ...; final = base // (overlay final base); in final): the
+// fixed point is written OUT in Nix rather than computed here, because the
+// point of a transpiler is that the output does the work.
+//
+// `base` is BOUND, not inlined. `fix` passes it to the overlay as `prev` as
+// well as using it on the left of `//`, so inlining it would duplicate the
+// whole expression into the output, once per mention. The hand-written Nix a
+// reader would compare against binds it too.
 func Fix(base Expr, o Overlay) Expr {
+	b := fresh("base")
 	n := fresh("final")
-	added := o(Var{Name: n}, base)
+	added := o(Var{Name: n}, Var{Name: b})
 	return Let{
-		Binds: []Binding{Bind{Path: AttrPath{ID{Name: n}}, Value: Update(base, added)}},
-		Body:  Var{Name: n},
+		Binds: []Binding{
+			Bind{Path: AttrPath{ID{Name: b}}, Value: base},
+			Bind{
+				Path:  AttrPath{ID{Name: n}},
+				Value: Update(Var{Name: b}, added),
+			},
+		},
+		Body: Var{Name: n},
 	}
 }

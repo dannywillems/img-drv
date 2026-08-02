@@ -8,6 +8,7 @@
 //	img-drv transpile <dir>   emit the same corpus as .nix source
 //	img-drv parsecheck <dir>  parse real .nix files, diff the tree
 //	img-drv reparse <dir>     parse what we emitted; must be the same tree
+//	img-drv worked <dir>      emit the worked example
 //
 // All exit non-zero on any failure, which is what makes them usable as CI
 // gates. The subcommands and their output match the Python and Rust
@@ -28,11 +29,11 @@ import (
 
 func main() {
 	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: img-drv [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse] <dir>")
+		fmt.Fprintln(os.Stderr, "usage: img-drv [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse|worked] <dir>")
 		os.Exit(2)
 	}
 	command, directory := os.Args[1], os.Args[2]
-	if command != "examples" && command != "transpile" {
+	if command != "examples" && command != "transpile" && command != "worked" {
 		if info, err := os.Stat(directory); err != nil || !info.IsDir() {
 			fmt.Fprintf(os.Stderr, "not a directory: %s\n", directory)
 			os.Exit(2)
@@ -55,6 +56,8 @@ func main() {
 		code, err = parsecheck(directory)
 	case "reparse":
 		code, err = reparse(directory)
+	case "worked":
+		code, err = worked(directory)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", command)
 		os.Exit(2)
@@ -238,6 +241,20 @@ func parsecheck(directory string) (int, error) {
 	if bad > 0 {
 		return 1, nil
 	}
+	return 0, nil
+}
+
+// worked emits the worked example: a real package, through a real overlay.
+func worked(directory string) (int, error) {
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return 0, err
+	}
+	body := nix.ToNix(nix.WorkedExample()) + "\n"
+	target := filepath.Join(directory, "worked-example.nix")
+	if err := os.WriteFile(target, []byte(body), 0o644); err != nil {
+		return 0, err
+	}
+	fmt.Println("worked example written")
 	return 0, nil
 }
 

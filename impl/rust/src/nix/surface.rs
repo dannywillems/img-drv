@@ -78,6 +78,14 @@ pub fn path(p: &str) -> Expr {
     Expr::Path(p.to_string())
 }
 
+/// `<nixpkgs>`, a search-path lookup.
+///
+/// Impure: it reads NIX_PATH when evaluated, which is why a reproducible caller
+/// pins it.
+pub fn spath(p: &str) -> Expr {
+    Expr::SearchPath(p.to_string())
+}
+
 /// A variable reference.
 pub fn var(x: &str) -> Expr {
     Expr::Var(x.to_string())
@@ -283,17 +291,23 @@ pub fn compose_all(overlays: Vec<Overlay>) -> Overlay {
 
 /// Close an overlay into a package set with the knot tied.
 ///
-/// Emits `(let final = base // (overlay final base); in final)`: the fixed
-/// point is written OUT in Nix rather than computed here, because the point of
-/// a transpiler is that the output does the work.
+/// Emits `(let base = ...; final = base // (overlay final base); in final)`:
+/// the fixed point is written OUT in Nix rather than computed here, because the
+/// point of a transpiler is that the output does the work.
+///
+/// `base` is BOUND, not inlined. `fix` passes it to the overlay as `prev` as
+/// well as using it on the left of `//`, so inlining it would duplicate the
+/// whole expression into the output, once per mention. The hand-written Nix a
+/// reader would compare against binds it too.
 pub fn fix(base: Expr, o: &Overlay) -> Expr {
+    let b = fresh("base");
     let n = fresh("final");
-    let added = o(&Expr::Var(n.clone()), &base);
+    let added = o(&Expr::Var(n.clone()), &Expr::Var(b.clone()));
     Expr::Let(
-        vec![Binding::Bind(
-            vec![Attr::Id(n.clone())],
-            update(base, added),
-        )],
+        vec![
+            Binding::Bind(vec![Attr::Id(b.clone())], base),
+            Binding::Bind(vec![Attr::Id(n.clone())], update(Expr::Var(b), added)),
+        ],
         Box::new(Expr::Var(n)),
     )
 }

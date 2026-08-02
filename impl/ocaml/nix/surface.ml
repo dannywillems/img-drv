@@ -42,6 +42,10 @@ let str s = Str [Lit s]
 
 let path p = Path p
 
+(** [<nixpkgs>], a search-path lookup. Impure: it reads NIX_PATH when it is
+    evaluated, which is why a reproducible caller pins it. *)
+let spath p = Search_path p
+
 let var x = Var x
 
 let bool b = Var (if b then "true" else "false")
@@ -151,12 +155,23 @@ let compose_all (os : overlay list) : overlay =
 
 (** Close an overlay into a package set with the knot tied.
 
-    Emits [(let final = base // (overlay final base); in final)], which is the
-    fixed point written out in Nix rather than computed here: the point of a
-    transpiler is that the OUTPUT does the work. *)
+    Emits [(let base = ...; final = base // (overlay final base); in final)],
+    which is the fixed point written OUT in Nix rather than computed here: the
+    point of a transpiler is that the output does the work.
+
+    `base` is BOUND, not inlined. `fix` passes it to the overlay as `prev` as
+    well as using it on the left of `//`, so inlining it would duplicate the
+    whole expression into the output, once per mention. The hand-written Nix a
+    reader would compare against binds it too. *)
 let fix (base : t) (o : overlay) : t =
+  let b = fresh "base" in
   let n = fresh "final" in
-  Let ([Bind ([Aid n], Op (Update, base, o (Var n) base))], Var n)
+  Let
+    ( [
+        Bind ([Aid b], base);
+        Bind ([Aid n], Op (Update, Var b, o (Var n) (Var b)));
+      ],
+      Var n )
 
 (** {1 Output} *)
 

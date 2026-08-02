@@ -8,6 +8,7 @@
 //! img-drv transpile <dir>   emit the same corpus as .nix source
 //! img-drv parsecheck <dir>  parse real .nix files, diff the tree
 //! img-drv reparse <dir>     parse what we emitted; must be the same tree
+//! img-drv worked <dir>      emit the worked example
 //! ```
 //!
 //! All exit non-zero on any failure, which is what makes them usable as CI
@@ -25,12 +26,12 @@ fn main() -> ExitCode {
     let [command, directory] = args.as_slice() else {
         eprintln!(
             "usage: img-drv \
-             [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse] <dir>"
+             [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse|worked] <dir>"
         );
         return ExitCode::from(2);
     };
     let directory = PathBuf::from(directory);
-    if !matches!(command.as_str(), "examples" | "transpile") && !directory.is_dir() {
+    if !matches!(command.as_str(), "examples" | "transpile" | "worked") && !directory.is_dir() {
         eprintln!("not a directory: {}", directory.display());
         return ExitCode::from(2);
     }
@@ -42,6 +43,7 @@ fn main() -> ExitCode {
         "transpile" => transpile(&directory),
         "parsecheck" => parsecheck(&directory),
         "reparse" => reparse(&directory),
+        "worked" => worked(&directory),
         other => {
             eprintln!("unknown command: {other}");
             return ExitCode::from(2);
@@ -303,4 +305,13 @@ fn reparse(directory: &Path) -> Outcome {
         ok + bad
     );
     Ok(u8::from(bad > 0))
+}
+
+/// Emit the worked example: a real package, through a real overlay.
+fn worked(directory: &Path) -> Outcome {
+    std::fs::create_dir_all(directory)?;
+    let text = img_drv::nix::to_nix(&img_drv::nix::worked_example::term());
+    std::fs::write(directory.join("worked-example.nix"), format!("{text}\n"))?;
+    println!("worked example written");
+    Ok(0)
 }

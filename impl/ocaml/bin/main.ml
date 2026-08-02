@@ -123,6 +123,24 @@ let emit_nix directory =
   Printf.printf "%d expressions written to %s\n" (List.length corpus) directory ;
   0
 
+(** Emit the worked example: a real package, through a real overlay. *)
+let emit_worked directory =
+  let rec mkdir_p d =
+    if not (Sys.file_exists d) then begin
+      mkdir_p (Filename.dirname d) ;
+      try Unix.mkdir d 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+    end
+  in
+  mkdir_p directory ;
+  let oc = open_out_bin (Filename.concat directory "worked-example.nix") in
+  output_string
+    oc
+    (Img_drv_nix.Surface.to_nix (Img_drv_nix.Worked_example.term ())) ;
+  output_string oc "\n" ;
+  close_out oc ;
+  print_endline "worked example written" ;
+  0
+
 (** Differential-test the PARSER against real Nix, on real expressions.
 
     [directory] holds pairs: [x.nix] is the source and [x.expected] is what the
@@ -302,7 +320,10 @@ let () =
   match Sys.argv with
   | [|_; command; directory|] ->
       let needs_dir =
-        not (String.equal command "examples" || String.equal command "transpile")
+        not
+          (String.equal command "examples"
+          || String.equal command "transpile"
+          || String.equal command "worked")
       in
       if
         needs_dir
@@ -320,6 +341,7 @@ let () =
         | "transpile" -> emit_nix directory
         | "parsecheck" -> parse_check directory
         | "reparse" -> reparse directory
+        | "worked" -> emit_worked directory
         | other ->
             Printf.eprintf "unknown command: %s\n" other ;
             exit 2
@@ -328,6 +350,6 @@ let () =
   | _ ->
       prerr_endline
         "usage: img-drv \
-         [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse] \
+         [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse|worked] \
          <directory>" ;
       exit 2

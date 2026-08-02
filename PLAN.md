@@ -20,26 +20,21 @@ How it is used:
 
 Ordered. The top item is the next thing to do.
 
-1. **A worked example that is not a conformance intent.** The transpiler is
-   proved on eleven derivations nobody would write by hand. The next thing it
-   has to survive is one real package expressed through `surface` in each
-   language, with an overlay applied, instantiated against a pinned nixpkgs.
-   That is where the surface's ergonomics get their first honest test.
-2. **Decide the `JSONValue` encoding in Go.** `docs/abstractions.md` entry 12
+1. **Decide the `JSONValue` encoding in Go.** `docs/abstractions.md` entry 12
    found that the sealed interface used by `impl/go/nix/` is strictly better
    than the discriminant struct used by `impl/go/json.go`, and was available
    there too. Changing it is a BREAKING change to the Go library's public API
    for a type verified across 2063 output paths, so it needs a decision, not a
    drive-by cleanup.
-3. **The EVALUATOR**, so a real nixpkgs package can be READ and not merely
+2. **The EVALUATOR**, so a real nixpkgs package can be READ and not merely
    re-emitted. Parsing is the easy half and is nearly done; the evaluator has
    no `derivation` primop yet, and without one no parsed package can become
    IR. This is where `import`, laziness and string contexts arrive.
-4. **Describe `scripts/probe.nix` in the eDSL** so `make differential` becomes
+3. **Describe `scripts/probe.nix` in the eDSL** so `make differential` becomes
    a LIVE oracle for the eDSL rather than only for the parser. The ten golden
    examples already pin the eDSL against real Nix, but they are checked-in
    files; the probe runs against a real `nix-instantiate` on every push.
-5. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
+4. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
    format (`docs/spec/canonical.md` section 3). Now also the one gap in the
    `.drv` path rule: no derivation we produce has a non-empty `inputSrcs`, so
    that half of the references set is verified only by reading real files.
@@ -74,6 +69,12 @@ Ordered. The top item is the next thing to do.
       than a printer bug; writing those eight down as a specification is what
       made the other three pass first time. See `docs/abstractions.md` entries
       13 and 14.
+- [x] **The SURFACE is tested against a real package.** `make worked-example`:
+      one package using `stdenv.mkDerivation`, a nixpkgs dependency, an overlay
+      and a fixed point, built through each language's `surface` and required
+      to instantiate to the same store path as the hand-written Nix beside it.
+      All four agree with the reference. The eleven intents pin the
+      serialization; this pins the part the project's claim actually rests on.
 - [x] **The two arrows compose.** `parse (emit e) = e`, up to three semantic
       no-ops, checked over the whole parser corpus by `make nixpkgs-parse`.
       This is what moved the corpus from the well-tested arrow to the
@@ -515,6 +516,13 @@ Resolved, kept here only so the resolution is findable:
 ---
 
 ## Plan log
+
+- **2026-08-02** A worked example that is not a conformance intent: a real
+  package through `surface` in all four languages, compared against
+  hand-written Nix by STORE PATH rather than by text. All four agree. Building
+  it surfaced one thing worth fixing: `fix` inlined `base` once per mention
+  instead of binding it, so the emitted source grew with the number of times an
+  overlay read `prev`.
 
 - **2026-08-02** Composed the two arrows for the first time: `parse . emit`.
   The retraction law went 197 of 300 to 1200 of 1200 and found three bugs the

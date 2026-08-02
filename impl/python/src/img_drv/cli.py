@@ -8,6 +8,7 @@
     python -m img_drv transpile <dir>   emit the same corpus as .nix source
     python -m img_drv parsecheck <dir>  parse real .nix files, diff the tree
     python -m img_drv reparse <dir>     parse what we emitted; must be the same
+    python -m img_drv worked <dir>      emit the worked example
 
 All exit non-zero on any failure, which is what makes them usable as CI
 gates. `examples` is what `make conformance` drives: each implementation
@@ -231,6 +232,17 @@ def reparse(directory: pathlib.Path) -> int:
     return 1 if bad else 0
 
 
+def worked(directory: pathlib.Path) -> int:
+    """Emit the worked example: a real package, through a real overlay."""
+    from .nix.emit import to_nix  # noqa: PLC0415
+    from .nix.worked_example import term  # noqa: PLC0415
+
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "worked-example.nix").write_text(to_nix(term()) + "\n")
+    print("worked example written")
+    return 0
+
+
 COMMANDS = {
     "verify": verify,
     "roundtrip": roundtrip,
@@ -238,6 +250,7 @@ COMMANDS = {
     "transpile": transpile,
     "parsecheck": parsecheck,
     "reparse": reparse,
+    "worked": worked,
     "drvpaths": drvpaths,
     "examples": examples,
 }
