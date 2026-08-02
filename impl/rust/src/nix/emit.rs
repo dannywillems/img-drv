@@ -52,6 +52,11 @@ fn parts(out: &mut String, parts: &[Part]) {
 fn attr(out: &mut String, a: &Attr) {
     match a {
         Attr::Id(name) => out.push_str(name),
+        Attr::Dyn(e) => {
+            out.push_str("${");
+            expr(out, e);
+            out.push('}');
+        }
         Attr::Str(ps) => match ps.as_slice() {
             [Part::Lit(s)] => {
                 let _ = write!(out, "\"{}\"", escape(s));
@@ -145,6 +150,21 @@ fn expr(out: &mut String, e: &Expr) {
             let _ = write!(out, "\"{}\"", escape(u));
         }
         Expr::Str(ps) | Expr::IndStr(ps) => parts(out, ps),
+        Expr::PathInterp(ps) => {
+            // The leading path is absolute after parsing, so this emits an
+            // absolute interpolated path: valid Nix, and the same file.
+            for p in ps {
+                match p {
+                    Part::Lit(s) => out.push_str(s),
+                    Part::Anti(Expr::Path(path)) => out.push_str(path),
+                    Part::Anti(e) => {
+                        out.push_str("${");
+                        expr(out, e);
+                        out.push('}');
+                    }
+                }
+            }
+        }
         Expr::Not(e) => {
             out.push_str("(!");
             expr(out, e);

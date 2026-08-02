@@ -30,14 +30,14 @@
 # constructions a fixed list would never contain. That is the same design as
 # scripts/fetch-corpus.sh, for the same reason.
 #
-# Usage: ./scripts/nixpkgs-parse.sh [count] [impl ...]   (default 300, ocaml python)
+# Usage: ./scripts/nixpkgs-parse.sh [count] [impl ...]   (default 300, all with a parser)
 
 set -euo pipefail
 
 COUNT="${1:-300}"
 shift || true
 if [ "$#" -eq 0 ]; then
-  set -- ocaml python
+  set -- ocaml python rust
 fi
 
 # A case rather than an associative array: macOS ships bash 3.2.

@@ -6,6 +6,7 @@
 //! img-drv canonical <dir>   canonicalizing must change nothing
 //! img-drv examples <dir>    emit the conformance corpus
 //! img-drv transpile <dir>   emit the same corpus as .nix source
+//! img-drv parsecheck <dir>  parse real .nix files, diff the tree
 //! ```
 //!
 //! All exit non-zero on any failure, which is what makes them usable as CI
@@ -21,7 +22,10 @@ use img_drv::{Corpus, canonical, examples::corpus, parse, unparse};
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let [command, directory] = args.as_slice() else {
-        eprintln!("usage: img-drv [verify|roundtrip|canonical|examples|transpile] <directory>");
+        eprintln!(
+            "usage: img-drv \
+             [verify|roundtrip|canonical|examples|transpile|parsecheck] <dir>"
+        );
         return ExitCode::from(2);
     };
     let directory = PathBuf::from(directory);
@@ -35,6 +39,7 @@ fn main() -> ExitCode {
         "canonical" => canonical_check(&directory),
         "examples" => emit_examples(&directory),
         "transpile" => transpile(&directory),
+        "parsecheck" => parsecheck(&directory),
         other => {
             eprintln!("unknown command: {other}");
             return ExitCode::from(2);
@@ -158,4 +163,77 @@ fn transpile(directory: &Path) -> Outcome {
         directory.display()
     );
     Ok(0)
+}
+
+/// Differential-test the PARSER against real Nix, on real expressions.
+///
+/// `directory` holds pairs: `x.nix` is the source and `x.expected` is what the
+/// pinned `nix-instantiate --parse` printed for it. We parse and print in the
+/// same form; the two must match byte for byte, which pins tree SHAPE rather
+/// than merely "it parsed".
+fn parsecheck(directory: &Path) -> Outcome {
+    // Nix expands `~` at parse time, so the harness records the oracle's HOME
+    // and it is replayed here.
+    let home = std::fs::read_to_string(directory.join("home"))
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    let mut expected: Vec<PathBuf> = std::fs::read_dir(directory)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|e| e == "expected"))
+        .collect();
+    expected.sort();
+
+    let (mut ok, mut bad) = (0usize, 0usize);
+    for exp in &expected {
+        let stem = exp.with_extension("");
+        let origin = std::fs::read_to_string(stem.with_extension("path"))
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let base = Path::new(&origin)
+            .parent()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        let want = std::fs::read_to_string(exp)?.trim().to_string();
+        let source = std::fs::read_to_string(stem.with_extension("nix"))?;
+        match img_drv::nix::parse_and_print(&source, &base, &home) {
+            Ok(got) if got.trim() == want => ok += 1,
+            Ok(got) => {
+                bad += 1;
+                if bad <= 5 {
+                    report(&origin, &want, got.trim());
+                }
+            }
+            Err(e) => {
+                bad += 1;
+                if bad <= 5 {
+                    println!("PARSE FAILED {origin}: {e}");
+                }
+            }
+        }
+    }
+    println!(
+        "{ok}/{} real nixpkgs expressions parse to the same tree as Nix",
+        ok + bad
+    );
+    Ok(u8::from(bad > 0))
+}
+
+/// Real expressions print to thousands of characters, so show the first
+/// divergence with a window either side; that is where the bug is.
+fn report(origin: &str, want: &str, got: &str) {
+    let d = want
+        .chars()
+        .zip(got.chars())
+        .position(|(a, b)| a != b)
+        .unwrap_or_else(|| want.len().min(got.len()));
+    let window = |s: &str| {
+        let from = d.saturating_sub(30);
+        s.chars().skip(from).take(90).collect::<String>()
+    };
+    println!("MISMATCH {origin} (at offset {d})");
+    println!("  want ...{}...", window(want));
+    println!("  got  ...{}...", window(got));
 }

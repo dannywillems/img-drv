@@ -28,6 +28,13 @@ pub enum Expr {
     IndStr(Vec<Part>),
     /// A path literal.
     Path(String),
+    /// A path containing an interpolation, `./x/${v}.nix`.
+    ///
+    /// NOT a string: Nix models it as a concatenation whose first element is a
+    /// path, and prints it as `(/abs/x/ + v + ".nix")`. The parts use the same
+    /// `Lit`/`Anti` shape as a string's, with the leading path carried as an
+    /// `Anti(Path(..))` so it prints bare.
+    PathInterp(Vec<Part>),
     /// `<nixpkgs>`
     SearchPath(String),
     /// `scheme:path`. Note that `x:x` lexes as THIS and not as a lambda.
@@ -81,8 +88,16 @@ pub enum Part {
 pub enum Attr {
     /// An identifier, `a`.
     Id(String),
-    /// A string or interpolation, `."a"` or `.${e}`.
+    /// A string literal, `."a"`.
     Str(Vec<Part>),
+    /// An expression naming the attribute DIRECTLY, `.${e}`.
+    ///
+    /// Distinct from `Str` holding one antiquotation, which is `."${e}"`,
+    /// because Nix keeps them apart and prints them differently: `a.${k}`
+    /// prints as `(a)."${k}"` while `{ "${k}" = 1; }` prints as
+    /// `{ "${(k)}" = 1; }`. The parentheses are the string wrapper showing
+    /// through.
+    Dyn(Expr),
 }
 
 /// `a.b.c`

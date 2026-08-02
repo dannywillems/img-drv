@@ -1,0 +1,311 @@
+// The Nix grammar, for LALRPOP.
+//
+// Transcribed from NixOS/nix src/libexpr/parser.y at commit a86a3638. The
+// precedence is expressed as a STRATIFIED grammar rather than as a precedence
+// table, because LALRPOP has no `%left`/`%right`: each level is its own
+// nonterminal and the shape of the rules encodes the associativity. The twelve
+// levels are the same twelve, in the same order, as parser.y:208-219.
+//
+// Two of them surprise everyone, and getting either wrong changes what real
+// files MEAN rather than failing to parse them:
+//
+//   - `!` sits BELOW `+`, so `!a + b` is `!(a + b)`;
+//   - `//` sits ABOVE the comparisons, so `a // b == c` is `(a // b) == c`.
+//
+// Both are checked against nix-instantiate --parse.
+
+use crate::nix::ast::{Attr, AttrPath, Binding, Expr, Op, Part, Pattern};
+use crate::nix::lexer::{LexError, Tok};
+use crate::nix::paths::{resolve_path, resolve_path_prefix};
+use crate::nix::strings::{drop_empty, strip_indentation};
+use crate::nix::mk::{alias, bin, empty_set, prepend};
+
+grammar;
+
+extern {
+    type Location = usize;
+    type Error = LexError;
+
+    enum Tok {
+        "int" => Tok::Int(<i64>),
+        "float" => Tok::Float(<f64>),
+        "id" => Tok::Id(<String>),
+        "str" => Tok::Str(<String>),
+        "estr" => Tok::EStr(<String>),
+        "path" => Tok::Path(<String>),
+        "spath" => Tok::SPath(<String>),
+        "uri" => Tok::Uri(<String>),
+        "path_start" => Tok::PathStart(<String>),
+        "path_str" => Tok::PathStr(<String>),
+        "path_end" => Tok::PathEnd,
+        "if" => Tok::If,
+        "then" => Tok::Then,
+        "else" => Tok::Else,
+        "assert" => Tok::Assert,
+        "with" => Tok::With,
+        "let" => Tok::Let,
+        "in" => Tok::In,
+        "rec" => Tok::Rec,
+        "inherit" => Tok::Inherit,
+        "or" => Tok::OrKw,
+        "\"" => Tok::DQuote,
+        "ind_open" => Tok::IndOpen,
+        "ind_close" => Tok::IndClose,
+        "${" => Tok::DollarCurly,
+        "{" => Tok::LCurly,
+        "}" => Tok::RCurly,
+        "(" => Tok::LParen,
+        ")" => Tok::RParen,
+        "[" => Tok::LBrack,
+        "]" => Tok::RBrack,
+        ";" => Tok::Semi,
+        "," => Tok::Comma,
+        ":" => Tok::Colon,
+        "@" => Tok::At,
+        "." => Tok::Dot,
+        "..." => Tok::Ellipsis,
+        "=" => Tok::Assign,
+        "?" => Tok::Question,
+        "==" => Tok::Eq,
+        "!=" => Tok::Neq,
+        "<=" => Tok::Leq,
+        ">=" => Tok::Geq,
+        "<" => Tok::Lt,
+        ">" => Tok::Gt,
+        "&&" => Tok::And,
+        "||" => Tok::Or,
+        "->" => Tok::Impl,
+        "//" => Tok::Update,
+        "++" => Tok::Concat,
+        "+" => Tok::Plus,
+        "-" => Tok::Minus,
+        "*" => Tok::Times,
+        "/" => Tok::Slash,
+        "!" => Tok::Not,
+    }
+}
+
+pub Main: Expr = <Expr>;
+
+Expr: Expr = <ExprFunction>;
+
+ExprFunction: Expr = {
+    <x:"id"> ":" <body:ExprFunction> => Expr::Lambda(Pattern::Var(x), Box::new(body)),
+    <p:FormalSet> ":" <body:ExprFunction> => Expr::Lambda(p, Box::new(body)),
+    <p:FormalSet> "@" <x:"id"> ":" <body:ExprFunction> =>
+        Expr::Lambda(alias(p, x), Box::new(body)),
+    <x:"id"> "@" <p:FormalSet> ":" <body:ExprFunction> =>
+        Expr::Lambda(alias(p, x), Box::new(body)),
+    // `{}` is the ONE genuinely ambiguous prefix: an empty attribute set in
+    // expression position and an empty formal set before a `:`. Factoring it
+    // into its own nonterminal defers the decision to the token AFTER the
+    // brace, which is what makes the grammar LR(1). Nix's parser.y does the
+    // same and declares %expect 0.
+    EmptyBraces ":" <body:ExprFunction> => Expr::Lambda(empty_set(None), Box::new(body)),
+    EmptyBraces "@" <x:"id"> ":" <body:ExprFunction> =>
+        Expr::Lambda(empty_set(Some(x)), Box::new(body)),
+    <x:"id"> "@" EmptyBraces ":" <body:ExprFunction> =>
+        Expr::Lambda(empty_set(Some(x)), Box::new(body)),
+    "assert" <c:Expr> ";" <body:ExprFunction> => Expr::Assert(Box::new(c), Box::new(body)),
+    "with" <e:Expr> ";" <body:ExprFunction> => Expr::With(Box::new(e), Box::new(body)),
+    "let" <b:Binds> "in" <body:ExprFunction> => Expr::Let(b, Box::new(body)),
+    ExprIf,
+};
+
+ExprIf: Expr = {
+    "if" <c:Expr> "then" <t:Expr> "else" <f:Expr> =>
+        Expr::If(Box::new(c), Box::new(t), Box::new(f)),
+    ExprImpl,
+};
+
+// The twelve precedence levels, lowest binding first. Right-associative levels
+// recurse on the RIGHT, left-associative on the LEFT; that is the whole trick.
+ExprImpl: Expr = {
+    <a:ExprOr> "->" <b:ExprImpl> => bin(Op::Impl, a, b),
+    ExprOr,
+};
+
+ExprOr: Expr = {
+    <a:ExprOr> "||" <b:ExprAnd> => bin(Op::Or, a, b),
+    ExprAnd,
+};
+
+ExprAnd: Expr = {
+    <a:ExprAnd> "&&" <b:ExprEq> => bin(Op::And, a, b),
+    ExprEq,
+};
+
+// Non-associative: both sides are the NEXT level up, so `a == b == c` does not
+// parse, exactly as in Nix.
+ExprEq: Expr = {
+    <a:ExprCmp> "==" <b:ExprCmp> => bin(Op::Eq, a, b),
+    <a:ExprCmp> "!=" <b:ExprCmp> => bin(Op::Neq, a, b),
+    ExprCmp,
+};
+
+ExprCmp: Expr = {
+    <a:ExprUpdate> "<" <b:ExprUpdate> => bin(Op::Lt, a, b),
+    <a:ExprUpdate> ">" <b:ExprUpdate> => bin(Op::Gt, a, b),
+    <a:ExprUpdate> "<=" <b:ExprUpdate> => bin(Op::Le, a, b),
+    <a:ExprUpdate> ">=" <b:ExprUpdate> => bin(Op::Ge, a, b),
+    ExprUpdate,
+};
+
+ExprUpdate: Expr = {
+    <a:ExprNot> "//" <b:ExprUpdate> => bin(Op::Update, a, b),
+    ExprNot,
+};
+
+// `!` binds LOOSER than `+`, which is the trap.
+ExprNot: Expr = {
+    "!" <e:ExprNot> => Expr::Not(Box::new(e)),
+    ExprAdd,
+};
+
+ExprAdd: Expr = {
+    <a:ExprAdd> "+" <b:ExprMul> => bin(Op::Add, a, b),
+    <a:ExprAdd> "-" <b:ExprMul> => bin(Op::Sub, a, b),
+    ExprMul,
+};
+
+ExprMul: Expr = {
+    <a:ExprMul> "*" <b:ExprConcat> => bin(Op::Mul, a, b),
+    <a:ExprMul> "/" <b:ExprConcat> => bin(Op::Div, a, b),
+    ExprConcat,
+};
+
+ExprConcat: Expr = {
+    <a:ExprNeg> "++" <b:ExprConcat> => bin(Op::Concat, a, b),
+    ExprNeg,
+};
+
+ExprNeg: Expr = {
+    "-" <e:ExprNeg> => Expr::Neg(Box::new(e)),
+    ExprHasAttr,
+};
+
+ExprHasAttr: Expr = {
+    <e:ExprApp> "?" <p:AttrPath> => Expr::HasAttr(Box::new(e), p),
+    ExprApp,
+};
+
+ExprApp: Expr = {
+    <f:ExprApp> <a:ExprSelect> => Expr::Apply(Box::new(f), Box::new(a)),
+    ExprSelect,
+};
+
+ExprSelect: Expr = {
+    <e:ExprSimple> "." <p:AttrPath> => Expr::Select(Box::new(e), p, None),
+    <e:ExprSimple> "." <p:AttrPath> "or" <d:ExprSelect> =>
+        Expr::Select(Box::new(e), p, Some(Box::new(d))),
+    ExprSimple,
+};
+
+ExprSimple: Expr = {
+    <x:"id"> => Expr::Var(x),
+    <n:"int"> => Expr::Int(n),
+    <f:"float"> => Expr::Float(f),
+    <p:"path"> => Expr::Path(resolve_path(&p)),
+    // The lexer hands over the prefix having ALREADY consumed the opening
+    // `${`, so the first interpolation is spelled out here.
+    <p:"path_start"> <e:Expr> "}" <rest:PathParts> => {
+        let mut parts = vec![
+            Part::Anti(Expr::Path(resolve_path_prefix(&p))),
+            Part::Anti(e),
+        ];
+        parts.extend(rest);
+        Expr::PathInterp(parts)
+    },
+    <p:"spath"> => Expr::SearchPath(p),
+    <u:"uri"> => Expr::Uri(u),
+    "\"" <parts:StringParts> "\"" =>
+        Expr::Str(drop_empty(parts.into_iter().map(|(p, _)| p).collect())),
+    // After dedenting, an indented string with a single literal part IS a
+    // plain string: Nix does not wrap a one-element concatenation.
+    "ind_open" <parts:StringParts> "ind_close" => {
+        let stripped = strip_indentation(parts);
+        match stripped.as_slice() {
+            [Part::Lit(_)] => Expr::Str(stripped),
+            _ => Expr::IndStr(stripped),
+        }
+    },
+    "(" <e:Expr> ")" => e,
+    "rec" "{" <b:Binds> "}" => Expr::AttrSet { recursive: true, binds: b },
+    "{" <b:Binds1> "}" => Expr::AttrSet { recursive: false, binds: b },
+    EmptyBraces => Expr::AttrSet { recursive: false, binds: vec![] },
+    "[" <items:ListItems> "]" => Expr::List(items),
+};
+
+PathParts: Vec<Part> = {
+    "path_end" => vec![],
+    <s:"path_str"> <rest:PathParts> => prepend(Part::Lit(s), rest),
+    "${" <e:Expr> "}" <rest:PathParts> => prepend(Part::Anti(e), rest),
+};
+
+StringParts: Vec<(Part, bool)> = {
+    => vec![],
+    <s:"str"> <rest:StringParts> => prepend((Part::Lit(s), true), rest),
+    <s:"estr"> <rest:StringParts> => prepend((Part::Lit(s), false), rest),
+    "${" <e:Expr> "}" <rest:StringParts> => prepend((Part::Anti(e), false), rest),
+};
+
+ListItems: Vec<Expr> = {
+    => vec![],
+    <e:ExprSelect> <rest:ListItems> => prepend(e, rest),
+};
+
+EmptyBraces: () = "{" "}" => ();
+
+Binds: Vec<Binding> = {
+    => vec![],
+    Binds1,
+};
+
+Binds1: Vec<Binding> = {
+    <p:AttrPath> "=" <e:Expr> ";" <rest:Binds> => prepend(Binding::Bind(p, e), rest),
+    "inherit" <attrs:InheritAttrs> ";" <rest:Binds> =>
+        prepend(Binding::Inherit(None, attrs), rest),
+    "inherit" "(" <e:Expr> ")" <attrs:InheritAttrs> ";" <rest:Binds> =>
+        prepend(Binding::Inherit(Some(e), attrs), rest),
+};
+
+InheritAttrs: Vec<Attr> = {
+    => vec![],
+    <a:Attr> <rest:InheritAttrs> => prepend(a, rest),
+};
+
+AttrPath: AttrPath = {
+    <a:Attr> => vec![a],
+    <a:Attr> "." <rest:AttrPath> => prepend(a, rest),
+};
+
+Attr: Attr = {
+    <x:"id"> => Attr::Id(x),
+    "or" => Attr::Id("or".to_string()),
+    "\"" <parts:StringParts> "\"" =>
+        Attr::Str(drop_empty(parts.into_iter().map(|(p, _)| p).collect())),
+    "${" <e:Expr> "}" => Attr::Dyn(e),
+};
+
+// Non-empty only; the empty case is EmptyBraces above. This mirrors
+// parser.y:570-583, where `formals` is likewise non-nullable.
+FormalSet: Pattern = {
+    "{" "..." "}" => Pattern::Set { formals: vec![], ellipsis: true, alias: None },
+    "{" <f:Formals> "}" => Pattern::Set { formals: f, ellipsis: false, alias: None },
+    "{" <f:Formals> "," "}" =>
+        Pattern::Set { formals: f, ellipsis: false, alias: None },
+    "{" <f:Formals> "," "..." "}" =>
+        Pattern::Set { formals: f, ellipsis: true, alias: None },
+};
+
+// LEFT recursive, as parser.y:578-583 is. The right-recursive form makes a
+// trailing comma indistinguishable from another formal until one token later.
+Formals: Vec<(String, Option<Expr>)> = {
+    <f:Formal> => vec![f],
+    <mut rest:Formals> "," <f:Formal> => { rest.push(f); rest },
+};
+
+Formal: (String, Option<Expr>) = {
+    <x:"id"> => (x, None),
+    <x:"id"> "?" <e:Expr> => (x, Some(e)),
+};

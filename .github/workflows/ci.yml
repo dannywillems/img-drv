@@ -128,4 +128,4 @@ jobs:
       #
       # It found eight distinct bug classes on its first run, against a parser
       # that already passed 59 hand-written vectors.
-      - run: make nixpkgs-parse N=300 IMPLS='ocaml python'
+      - run: make nixpkgs-parse N=300 IMPLS='ocaml python rust'

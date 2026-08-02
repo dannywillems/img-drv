@@ -11,12 +11,29 @@ keywords = ["reproducible-builds", "nix", "derivation", "build-system"]
 categories = ["development-tools::build-utils"]
 # Explicit include list, never an exclude: a new top-level file ships only when
 # someone adds it deliberately.
-include = ["src/**/*.rs", "Cargo.toml", "README.md", "LICENSE"]
+include = [
+  "src/**/*.rs",
+  "src/**/*.lalrpop",
+  "build.rs",
+  "Cargo.toml",
+  "README.md",
+  "LICENSE",
+]
 
 [dependencies]
-# The only runtime dependency. The Python reference has none, because hashing
-# is in its standard library; this is the same decision, not a looser one.
+# The only runtime dependency of the IR core. The Python reference has none,
+# because hashing is in its standard library; this is the same decision, not a
+# looser one.
 sha2 = "0.10.9"
+# The Nix EXPRESSION layer. `lalrpop` itself is a BUILD dependency and does not
+# ship; only its small runtime and the lexer do. That is the difference from
+# Python, where PLY builds its tables at import time and is a genuine runtime
+# dependency.
+lalrpop-util = { version = "0.23.1", features = ["lexer"] }
+logos = "0.16.1"
+
+[build-dependencies]
+lalrpop = "0.23.1"
 
 [dev-dependencies]
 proptest = "1.9"
