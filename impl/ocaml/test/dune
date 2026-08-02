@@ -1,5 +1,5 @@
 (test
  (name test_img_drv)
- (libraries img_drv alcotest unix)
+ (libraries img_drv img_drv_nix alcotest unix)
  (flags
   (:standard -w +a-4-40-42-44-70 -warn-error +a)))

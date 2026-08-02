@@ -13,6 +13,7 @@ bug-reports: "https://github.com/dannywillems/img-drv/issues"
 depends: [
   "ocaml" {>= "5.5.0"}
   "dune" {>= "3.24"}
+  "menhir" {>= "20260209"}
   "alcotest" {>= "1.9.0" & with-test}
   "ocamlformat" {>= "0.29.0" & with-dev-setup}
   "odoc" {with-doc}

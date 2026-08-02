@@ -2,6 +2,8 @@
 (name img_drv)
 (generate_opam_files true)
 
+(using menhir 3.0)
+
 (formatting
  (enabled_for ocaml))
 
@@ -30,6 +32,8 @@
    (>= 5.5.0))
   (dune
    (>= 3.24))
+  (menhir
+   (>= 20260209))
   (alcotest
    (and
     (>= 1.9.0)

@@ -465,6 +465,41 @@ let law_described_closure_verifies () =
     Unix.rmdir dir
   done
 
+(* ------------------------------------------------------------------ *)
+(* the Nix parser, against vectors produced by real Nix                *)
+(* ------------------------------------------------------------------ *)
+
+let vectors_path =
+  match Sys.getenv_opt "IMG_DRV_NIX_VECTORS" with
+  | Some p -> p
+  | None -> failwith "IMG_DRV_NIX_VECTORS is not set; see scripts/ml-check.sh"
+
+let vectors () =
+  read_file vectors_path |> String.split_on_char '\n'
+  |> List.filter_map (fun line ->
+      if String.length line = 0 || line.[0] = '#' then None
+      else
+        match String.index_opt line '\t' with
+        | None -> None
+        | Some i ->
+            Some
+              ( String.sub line 0 i,
+                String.sub line (i + 1) (String.length line - i - 1) ))
+
+let test_parser_matches_nix () =
+  (* The differential oracle. nix-instantiate --parse re-prints the tree it
+     parsed, so matching it byte for byte proves our tree has the same SHAPE,
+     which is far stronger than "it parsed". *)
+  let vs = vectors () in
+  Alcotest.(check bool) "vectors present" true (List.length vs >= 20) ;
+  List.iter
+    (fun (input, expected) ->
+      match Img_drv_nix.Nix.parse_and_print input with
+      | Error e ->
+          Alcotest.fail (Printf.sprintf "%s\n  parse error: %s" input e)
+      | Ok got -> Alcotest.(check string) input expected got)
+    vs
+
 let () =
   let case name f = Alcotest.test_case name `Quick f in
   Alcotest.run
@@ -504,6 +539,8 @@ let () =
             "a digest means the same however written"
             test_a_digest_means_the_same_however_written;
         ] );
+      ( "nix parser",
+        [case "matches nix-instantiate --parse" test_parser_matches_nix] );
       ( "laws",
         [
           case "same intent twice, same bytes" law_same_intent_twice;

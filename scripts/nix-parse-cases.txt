@@ -1,0 +1,59 @@
+let a=1; b=2; c=3; in a + b * c
+let a=1; b=2; in !a + b
+let a=1; b=2; c=3; in a // b == c
+let a=1; b=2; c=3; in a ++ b ++ c
+let a=1; b=2; c=3; in a -> b -> c
+let a=1; in -a
+let a=1; in a - -a
+let a=1; b=2; c=3; in if a then b else c
+let a={b={c=1;};}; d=2; in a.b.c or d
+let a=1; b=2; in a ? b
+let a=1; in with a; a
+let a=1; in assert a; a
+let b=1; in "a${toString b}c"
+let a={b={c=1;};}; in a.b.${"c"}
+let a=1; in { inherit a; }
+let a={b=1;}; in { inherit (a) b; }
+let a=1; in [ a (a) ]
+let f=x: x; in f 1 2
+let f={a,b?1,...}: a; in f
+let f={}: 1; in f
+let f=x@{a}: a; in f
+let a=1; in rec { b = 1; }
+let a=1; in { }
+let a=1; in a.b.c
+let b=1; in "a${b}c"
+let b=1; in "${b}"
+let b=1; in "plain"
+let a={b={c=1;};}; in a.b."c"
+let a={b=1;}; k="b"; in a.${k}
+let a=1; in { "x" = 1; }
+let a=1; k="y"; in { ${k} = 1; }
+let a=1; b=2; in a * b + a
+let a=1; b=2; in a + b * a
+let a=1; b=2; in a / b - a
+let a=1; b=2; c=3; in a && b || c
+let a=1; b=2; c=3; in a || b && c
+let a=1; b=2; c=3; in a == b && c
+let a=1; b=2; in a < b
+let a=1; b=2; in a >= b
+let a=1; b=2; in a != b
+let a=1; in /absolute/path
+let a=1; in <nixpkgs>
+let a=1; in http://example.com/x
+let a=1; in x:x
+let a=1; in 1.5
+let a=1; in 0.5e10
+let a=1; in [ ]
+let a=1; in { a.b.c = 1; }
+let a=1; in { or = 1; }
+let f=a: b: c: a; in f
+let a=1; in /* block */ a
+let a=1; b=2; in a.b or (a)
+let a={}; in a
+let a=1; b=2; in a > b
+let a=1; b=2; in a <= b
+let a=1; in 3.0
+let a=1; in 0.1
+let x=1; in { a.b = 1; a.c = 2; }
+let x=1; in { a.b = 1; d = 2; }
