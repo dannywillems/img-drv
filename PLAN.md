@@ -37,8 +37,15 @@ Ordered. The top item is the next thing to do.
    checked against NIX, so a rule OCaml got wrong in a way the corpus has not
    yet reached would show up as disagreement rather than as shared silence.
 
-   Order: Python (fastest to iterate), then Rust, then Go. Each lands with
-   `make nixpkgs-parse <lang>` green before the next starts.
+   Python (PLY) and Rust (LALRPOP + logos) are DONE and in CI; both passed the
+   corpus on the first run, because entry 13 had already turned the eight rules
+   into a specification. **Go is what remains**, and it is the interesting one:
+   the decision record calls for a hand-written scanner in the goyacc idiom,
+   because Go has no standard lexer generator, and goyacc has no build step so
+   the generated parser is COMMITTED rather than produced during the build.
+   That makes it the only implementation where the generated table is a
+   reviewable artifact, and the only one where a stale checkout is possible.
+   `docs/abstractions.md` entry 14 compares the toolchains.
 
 2. **A worked example that is not a conformance intent.** The transpiler is
    proved on eleven derivations nobody would write by hand. The next thing it

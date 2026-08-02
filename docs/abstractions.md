@@ -675,3 +675,64 @@ from a tree pinned by commit, which is the same design as `make corpus` and for
 the same reason: a fixed list stops finding things the moment it passes. A
 failure is reproducible because the tree is pinned; coverage keeps growing
 because the sample is not.
+
+## 14. Four parser toolchains, and what each one refuses to do
+
+**Structure:** none new; this is a MEASUREMENT along the same axis as entries
+6, 8, 9 and 12, but of the TOOLING rather than the type system.
+
+The same grammar, in three generators so far. Every difference below changed
+the code, and none of them changed what the parser accepts.
+
+|                      | OCaml            | Python             | Rust                   | Go        |
+| -------------------- | ---------------- | ------------------ | ---------------------- | --------- |
+| lexer                | ocamllex         | PLY `lex`          | logos                  | (pending) |
+| parser               | menhir           | PLY `yacc`         | LALRPOP                | goyacc    |
+| match rule           | LONGEST          | **FIRST**          | LONGEST                |           |
+| precedence           | `%left`/`%right` | `precedence` tuple | **stratified grammar** |           |
+| lookahead in lexer   | no               | **yes** (`(?=)`)   | no                     |           |
+| zero-length match    | allowed          | **rejected**       | n/a                    |           |
+| generator at runtime | no               | **yes**            | no                     |           |
+
+**PLY matches FIRST, not longest.** It builds one Python regex by alternation
+and `re` is leftmost-first, so rule ORDER is load-bearing in `lexer.py` and
+irrelevant in `lexer.mll`. `uri` must precede `id` or `x:x` stops being a URI;
+every multi-character operator must precede its one-character prefix. This is
+the only one of the four where a correct grammar can be broken by moving a
+function.
+
+**Python can express flex's trailing context; the other two cannot.** A string
+ending in `$` needs "a run followed by a quote, without consuming the quote".
+`re` writes that as `(?=\")`. ocamllex and logos have no lookahead, so both
+match the quote and then rewind one character. Same rule, three spellings, and
+the Python one is the only one that says what it means.
+
+**PLY rejects a zero-length match, which forces a queue.** The end of an
+interpolated path has to be signalled WITHOUT consuming the character that
+ended it. ocamllex allows an empty rule and does it directly. PLY does not, so
+`NixLexer` carries a one-token queue. Rust needs the same queue for a different
+reason: its lexer is a plain iterator, so there is nowhere else to put a token
+that has no input behind it.
+
+**LALRPOP has no precedence declarations at all.** The twelve levels become
+twelve nonterminals, with left recursion for left associativity and right for
+right. More verbose than `%left`, and more explicit: the associativity is in
+the shape of the rule instead of in a table somewhere else. The two traps (`!`
+below `+`, `//` above the comparisons) are ordinary nonterminals, so a reader
+sees them without knowing the declaration syntax.
+
+**Only Python pays at runtime.** menhir, LALRPOP and goyacc all generate source
+at build time and vanish from the artifact; PLY builds its LALR tables at
+IMPORT time, because Python has no build step. That is why `ply` is an optional
+extra rather than a dependency: the IR core promises none, and someone
+embedding img-drv to emit derivations should not inherit a parser generator to
+do it.
+
+**The one that generalises.** Both ports passed the corpus on the FIRST run.
+That is not evidence they are independently correct, and reading it that way
+would repeat entry 10's mistake. It is evidence that entry 13 did its job:
+turning eight discovered rules into a written specification is what made two
+ports cheap, where the first cost eight rounds of probing. The corpus still
+earns its place, because each implementation is checked against NIX rather than
+against the others, so a rule OCaml has wrong in a way the corpus has not yet
+reached surfaces as one implementation failing rather than as three agreeing.
