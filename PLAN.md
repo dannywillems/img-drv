@@ -20,23 +20,28 @@ How it is used:
 
 Ordered. The top item is the next thing to do.
 
-1. **The TRANSPILER: write Nix expressions in the host language, print `.nix`.**
-   This is the goal the project is actually for, restated: a developer,
-   researcher or ops engineer writes in the language they already know and
-   never learns the Nix language. `docs/theory.md` section 8 establishes that
-   it is possible and what it costs; `docs/architecture.md` says how the
-   codebase is organized for it. The first milestone is the COMMUTING SQUARE,
-   not "it prints something Nix accepts": print a term to `.nix`, hand it to
-   real Nix, and get the same `.drv` our own evaluator produces, checked
-   against the eleven intents `make conformance` already pins.
-2. **A Nix EXPRESSION front-end**, so a real nixpkgs package can be read and
-   not merely re-emitted. OCaml's parser is done; the evaluator is started.
-3. **Describe `scripts/probe.nix` in the eDSL** so `make differential` becomes
+1. **The transpiler in the other three languages.** OCaml closes the commuting
+   square on 11 of 11 intents; Python, Rust and Go have no `emit`/`surface`
+   yet. Porting `surface` first is the right order: it is HOAS plus a fresh
+   supply plus the overlay monoid, it needs only functions and records, and it
+   is where the "same composability in four languages" claim is actually
+   tested. `make transpile-check` extends to each as it lands.
+2. **`compose/`: overlays as mixins, in all four languages.** The monoid
+   (`compose`, identity, `fix`) exists in `impl/ocaml/nix/surface.ml` and is
+   the honest answer to "a trait/signature/abstract class describing a Nix
+   expression". Exit test: an overlay written in each language composes with
+   one written in another via the emitted `.nix`, and the square still closes.
+3. **A Nix EXPRESSION front-end**, so a real nixpkgs package can be read and
+   not merely re-emitted. OCaml's parser is done; the evaluator handles enough
+   for the square but has no `derivation` primop yet.
+4. **Describe `scripts/probe.nix` in the eDSL** so `make differential` becomes
    a LIVE oracle for the eDSL rather than only for the parser. The ten golden
    examples already pin the eDSL against real Nix, but they are checked-in
    files; the probe runs against a real `nix-instantiate` on every push.
-4. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
-   format (`docs/spec/canonical.md` section 3).
+5. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
+   format (`docs/spec/canonical.md` section 3). Now also the one gap in the
+   `.drv` path rule: no derivation we produce has a non-empty `inputSrcs`, so
+   that half of the references set is verified only by reading real files.
 
 ## State
 
@@ -49,9 +54,16 @@ Ordered. The top item is the next thing to do.
       derivations round-trip BYTE-IDENTICALLY.
 - [x] A real-vector harness: pull random nixpkgs packages, export their .drv
       closures, verify against them (`scripts/fetch-corpus.sh`).
-- [x] Store path computation. SOLVED and verified against real derivations:
-      1259 of 1259 output paths across 805 real nixpkgs derivations, plus
-      12 of 12 golden examples.
+- [x] Store path computation. Verified against real derivations: 2063 of 2063
+      output paths across a 1458-derivation closure, and 1458 of 1458 `.drv`
+      paths recomputed from the files' own bytes. The `.drv` path rule was
+      WRONG until the transpiler found it (references were omitted); see
+      `docs/abstractions.md` entry 10.
+- [x] **The commuting square closes.** `make transpile-check`: 11 of 11 intents
+      printed to `.nix`, instantiated by real Nix, reproduce the golden `.drv`.
+      This is the first oracle in the project where NIX chooses the answer
+      rather than validating one we chose, and it found a bug four green gates
+      had missed.
 - [x] CI: GitHub Actions, SHA-pinned, every job through a Makefile target.
 - [x] Oracle pinned by DIGEST (`scripts/pins.env`), with byte-stability
       measured across two Nix releases rather than assumed.
@@ -200,12 +212,12 @@ Every implementation targets the LATEST STABLE release of its language, pinned
 in a file, and CI uses that same pin. Versions verified upstream on
 2026-08-01:
 
-| language | version | pinned in |
-| --- | --- | --- |
-| Python | 3.14.6 | `.python-version` |
-| Go | 1.26.5 | `go.mod` |
-| Rust | 1.97.1 | `rust-toolchain.toml` |
-| OCaml | 5.5.0 | `dune-project` / opam switch |
+| language | version | pinned in                    |
+| -------- | ------- | ---------------------------- |
+| Python   | 3.14.6  | `.python-version`            |
+| Go       | 1.26.5  | `go.mod`                     |
+| Rust     | 1.97.1  | `rust-toolchain.toml`        |
+| OCaml    | 5.5.0   | `dune-project` / opam switch |
 
 Rule: no floor-version ranges, no "whatever is installed". A version moves in
 its own commit, with the diff readable, exactly as `iso-img` treats pins. A
@@ -482,6 +494,15 @@ Resolved, kept here only so the resolution is findable:
 
 ## Plan log
 
+- **2026-08-02** The commuting square closed on 11 of 11 intents, and failed 10
+  of 11 on its first run. The cause was ours: a `.drv` store path's fingerprint
+  lists the paths the file REFERENCES, and we omitted them. 1458 of 1458 real
+  nixpkgs filenames reproduce with the rule, 149 of 1458 without. Four green
+  gates had missed it because each compared our computation against a name we
+  had also computed. `make drvpath-check` now recomputes every corpus filename
+  from its own bytes; `docs/abstractions.md` entry 10 records why the gap was
+  structural rather than an oversight.
+
 - **2026-08-02** The goal restated, and the mathematics that decides whether it
   is reachable. The end state is not "read nixpkgs"; it is that people WRITE
   Nix expressions in OCaml, Rust, Go or Python and the tool prints `.nix`, so
@@ -736,7 +757,7 @@ Resolved, kept here only so the resolution is findable:
   and output names, since confusing two 64-character strings is a bug this
   project has already paid for), `mypy --strict` clean, and packaged. The
   serialization laws are property-tested with Hypothesis: `parse . unparse =
-  id` universally, `unparse . parse = id` on canonical text only, which is what
+id` universally, `unparse . parse = id` on canonical text only, which is what
   a canonical form MEANS.
 
 - **2026-08-01** Store path computation SOLVED: 1259 of 1259 output paths
