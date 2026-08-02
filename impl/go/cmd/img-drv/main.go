@@ -6,6 +6,7 @@
 //	img-drv canonical <dir>   canonicalizing must change nothing
 //	img-drv examples <dir>    emit the conformance corpus
 //	img-drv transpile <dir>   emit the same corpus as .nix source
+//	img-drv parsecheck <dir>  parse real .nix files, diff the tree
 //
 // All exit non-zero on any failure, which is what makes them usable as CI
 // gates. The subcommands and their output match the Python and Rust
@@ -25,7 +26,7 @@ import (
 
 func main() {
 	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: img-drv [verify|roundtrip|canonical|examples|transpile] <directory>")
+		fmt.Fprintln(os.Stderr, "usage: img-drv [verify|roundtrip|canonical|examples|transpile|parsecheck] <dir>")
 		os.Exit(2)
 	}
 	command, directory := os.Args[1], os.Args[2]
@@ -48,6 +49,8 @@ func main() {
 		code, err = emitExamples(directory)
 	case "transpile":
 		code, err = transpile(directory)
+	case "parsecheck":
+		code, err = parsecheck(directory)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", command)
 		os.Exit(2)
@@ -168,6 +171,88 @@ func transpile(directory string) (int, error) {
 	}
 	fmt.Printf("%d expressions written to %s\n", len(corpus), directory)
 	return 0, nil
+}
+
+// parsecheck differential-tests the PARSER against real Nix.
+//
+// directory holds pairs: x.nix is the source and x.expected is what the pinned
+// nix-instantiate --parse printed for it. We parse and print in the same form;
+// the two must match byte for byte, which pins tree SHAPE rather than merely
+// "it parsed".
+func parsecheck(directory string) (int, error) {
+	// Nix expands ~ at parse time, so the harness records the oracle's HOME.
+	home := ""
+	if b, err := os.ReadFile(filepath.Join(directory, "home")); err == nil {
+		home = strings.TrimSpace(string(b))
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return 0, err
+	}
+	names := []string{}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".expected") {
+			names = append(names, strings.TrimSuffix(e.Name(), ".expected"))
+		}
+	}
+	sort.Strings(names)
+
+	ok, bad := 0, 0
+	for _, base := range names {
+		origin := base
+		if b, err := os.ReadFile(filepath.Join(directory, base+".path")); err == nil {
+			origin = strings.TrimSpace(string(b))
+		}
+		wantBytes, err := os.ReadFile(filepath.Join(directory, base+".expected"))
+		if err != nil {
+			return 0, err
+		}
+		want := strings.TrimSpace(string(wantBytes))
+		src, err := os.ReadFile(filepath.Join(directory, base+".nix"))
+		if err != nil {
+			return 0, err
+		}
+		got, perr := nix.ParseAndPrint(string(src), filepath.Dir(origin), home)
+		if perr != nil {
+			bad++
+			if bad <= 5 {
+				fmt.Printf("PARSE FAILED %s: %v\n", origin, perr)
+			}
+			continue
+		}
+		if strings.TrimSpace(got) == want {
+			ok++
+			continue
+		}
+		bad++
+		if bad <= 5 {
+			reportDiff(origin, want, strings.TrimSpace(got))
+		}
+	}
+	fmt.Printf("%d/%d real nixpkgs expressions parse to the same tree as Nix\n",
+		ok, ok+bad)
+	if bad > 0 {
+		return 1, nil
+	}
+	return 0, nil
+}
+
+// reportDiff shows the first divergence with a window either side. Real
+// expressions print to thousands of characters, so showing both in full says
+// nothing.
+func reportDiff(origin, want, got string) {
+	d := 0
+	for d < len(want) && d < len(got) && want[d] == got[d] {
+		d++
+	}
+	window := func(s string) string {
+		from := max(0, d-30)
+		to := min(len(s), from+90)
+		return s[from:to]
+	}
+	fmt.Printf("MISMATCH %s (at offset %d)\n", origin, d)
+	fmt.Printf("  want ...%s...\n", window(want))
+	fmt.Printf("  got  ...%s...\n", window(got))
 }
 
 func drvFiles(directory string) ([]string, error) {

@@ -72,6 +72,10 @@ jobs:
       # gofmt, go vet and the race detector, all in the pinned image. No
       # actions/setup-go: the toolchain is the image.
       - run: make go-lint
+      # Go has no build step, so the generated parser is committed and can go
+      # stale. An edit to grammar.y that nobody regenerated still compiles and
+      # still parses the OLD language, which is the worst kind of green.
+      - run: make check-parser
       - run: make go-test
       - run: make go-build
 
@@ -128,4 +132,4 @@ jobs:
       #
       # It found eight distinct bug classes on its first run, against a parser
       # that already passed 59 hand-written vectors.
-      - run: make nixpkgs-parse N=300 IMPLS='ocaml python rust'
+      - run: make nixpkgs-parse N=300 IMPLS='ocaml python rust go'

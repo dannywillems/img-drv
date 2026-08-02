@@ -117,6 +117,14 @@ canonical-check: ## Canonicalizing a real derivation must change nothing
 corpus: ## Pull N random nixpkgs packages and verify against them (needs docker)
 	./scripts/fetch-corpus.sh $(N)
 
+.PHONY: generate-parser
+generate-parser: ## Regenerate the Go parser from grammar.y (goyacc)
+	./scripts/go-generate-parser.sh
+
+.PHONY: check-parser
+check-parser: ## Fail if the committed Go parser is stale
+	./scripts/go-generate-parser.sh --check
+
 .PHONY: nixpkgs-parse
 nixpkgs-parse: ## Parse N random real nixpkgs files, diff the tree vs Nix
 	./scripts/nixpkgs-parse.sh $(N) $(IMPLS)

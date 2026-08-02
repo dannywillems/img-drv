@@ -57,6 +57,10 @@ func writeAttr(b *strings.Builder, a Attr) {
 	switch a := a.(type) {
 	case ID:
 		b.WriteString(a.Name)
+	case DynAttr:
+		b.WriteString("${")
+		writeExpr(b, a.Expr)
+		b.WriteString("}")
 	case StrAttr:
 		if len(a.Parts) == 1 {
 			if lit, ok := a.Parts[0].(Lit); ok {
@@ -160,6 +164,23 @@ func writeExpr(b *strings.Builder, e Expr) {
 		writeParts(b, e.Parts)
 	case IndStr:
 		writeParts(b, e.Parts)
+	case PathInterp:
+		// The leading path is absolute after parsing, so this emits an
+		// absolute interpolated path: valid Nix, and the same file.
+		for _, p := range e.Parts {
+			switch p := p.(type) {
+			case Lit:
+				b.WriteString(p.Text)
+			case Anti:
+				if path, ok := p.Expr.(PathLit); ok {
+					b.WriteString(path.Text)
+					continue
+				}
+				b.WriteString("${")
+				writeExpr(b, p.Expr)
+				b.WriteString("}")
+			}
+		}
 	case Not:
 		b.WriteString("(!")
 		writeExpr(b, e.Expr)

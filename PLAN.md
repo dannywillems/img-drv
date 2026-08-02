@@ -20,53 +20,26 @@ How it is used:
 
 Ordered. The top item is the next thing to do.
 
-1. **The PARSER in Python, Rust and Go.** OCaml's reproduces Nix's own tree on
-   5000 of 5000 real nixpkgs files; the other three have none. Each uses its
-   language's standard generator per
-   `docs/decisions/2026-08-02-nix-frontend-build-not-reuse.md` (PLY, LALRPOP,
-   goyacc), and each has to clear the SAME two gates OCaml cleared: the 59
-   hand-written vectors in `docs/spec/nix-parse/vectors.tsv`, and
-   `make nixpkgs-parse` against real files.
-
-   The eight rules in `docs/abstractions.md` entry 13 are the specification
-   for this work, not a history: sort order, formals, inherit grouping,
-   identifier and keyword quoting, string chunk boundaries, indented-string
-   dedent with escape chunks excluded, path resolution at parse time, and the
-   `a.${k}` versus `a."${k}"` distinction. A port that reads only the OCaml
-   source will reproduce them; the value of the exercise is that each port is
-   checked against NIX, so a rule OCaml got wrong in a way the corpus has not
-   yet reached would show up as disagreement rather than as shared silence.
-
-   Python (PLY) and Rust (LALRPOP + logos) are DONE and in CI; both passed the
-   corpus on the first run, because entry 13 had already turned the eight rules
-   into a specification. **Go is what remains**, and it is the interesting one:
-   the decision record calls for a hand-written scanner in the goyacc idiom,
-   because Go has no standard lexer generator, and goyacc has no build step so
-   the generated parser is COMMITTED rather than produced during the build.
-   That makes it the only implementation where the generated table is a
-   reviewable artifact, and the only one where a stale checkout is possible.
-   `docs/abstractions.md` entry 14 compares the toolchains.
-
-2. **A worked example that is not a conformance intent.** The transpiler is
+1. **A worked example that is not a conformance intent.** The transpiler is
    proved on eleven derivations nobody would write by hand. The next thing it
    has to survive is one real package expressed through `surface` in each
    language, with an overlay applied, instantiated against a pinned nixpkgs.
    That is where the surface's ergonomics get their first honest test.
-3. **Decide the `JSONValue` encoding in Go.** `docs/abstractions.md` entry 12
+2. **Decide the `JSONValue` encoding in Go.** `docs/abstractions.md` entry 12
    found that the sealed interface used by `impl/go/nix/` is strictly better
    than the discriminant struct used by `impl/go/json.go`, and was available
    there too. Changing it is a BREAKING change to the Go library's public API
    for a type verified across 2063 output paths, so it needs a decision, not a
    drive-by cleanup.
-4. **The EVALUATOR**, so a real nixpkgs package can be READ and not merely
+3. **The EVALUATOR**, so a real nixpkgs package can be READ and not merely
    re-emitted. Parsing is the easy half and is nearly done; the evaluator has
    no `derivation` primop yet, and without one no parsed package can become
    IR. This is where `import`, laziness and string contexts arrive.
-5. **Describe `scripts/probe.nix` in the eDSL** so `make differential` becomes
+4. **Describe `scripts/probe.nix` in the eDSL** so `make differential` becomes
    a LIVE oracle for the eDSL rather than only for the parser. The ten golden
    examples already pin the eDSL against real Nix, but they are checked-in
    files; the probe runs against a real `nix-instantiate` on every push.
-6. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
+5. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
    format (`docs/spec/canonical.md` section 3). Now also the one gap in the
    `.drv` path rule: no derivation we produce has a non-empty `inputSrcs`, so
    that half of the references set is verified only by reading real files.
@@ -93,12 +66,18 @@ Ordered. The top item is the next thing to do.
       This is the first oracle in the project where NIX chooses the answer
       rather than validating one we chose, and it found a bug four green gates
       had missed.
-- [x] **The parser, against real nixpkgs.** `make nixpkgs-parse`: 5000 of 5000
-      real files parse to the same tree `nix-instantiate --parse` prints. It
-      scored 0 of 40 on its first run against a parser that already passed 59
-      hand-written vectors, and fixing that took eight distinct corrections,
-      one of which was a missing AST distinction rather than a printer bug.
-      See `docs/abstractions.md` entry 13.
+- [x] **The parser, in ALL FOUR languages, against real nixpkgs.**
+      `make nixpkgs-parse`: every implementation reproduces the tree
+      `nix-instantiate --parse` prints, on every file sampled, plus all 59
+      hand-written vectors. OCaml scored 0 of 40 on its first run and needed
+      eight distinct corrections, one of them a missing AST distinction rather
+      than a printer bug; writing those eight down as a specification is what
+      made the other three pass first time. See `docs/abstractions.md` entries
+      13 and 14.
+- [x] **The generated Go parser cannot go stale.** Go has no build step, so
+      `impl/go/nix/grammar.go` is committed; `make check-parser` regenerates
+      and diffs it in CI, because an un-regenerated `grammar.y` still compiles
+      and still parses the OLD language.
 - [x] **The transpiler in all four languages**: `ast`, `emit`, `surface` and
       the overlay monoid, with the one-way dependency on the IR that
       `docs/architecture.md` requires. No parser generator is a dependency of
@@ -532,6 +511,14 @@ Resolved, kept here only so the resolution is findable:
 ---
 
 ## Plan log
+
+- **2026-08-02** The parser landed in Python (PLY), Rust (LALRPOP + logos) and
+  Go (hand-written scanner + goyacc). All three passed the nixpkgs corpus on
+  the first run, which measures the specification rather than the ports: the
+  eight rules were already written down. Entry 14 compares the four toolchains;
+  the sharpest differences are that PLY matches FIRST rather than longest, only
+  Python has lexer lookahead, only LALRPOP has no precedence declarations, and
+  only Go has no lexer generator at all.
 
 - **2026-08-02** Pointed the parser at real nixpkgs and it scored 0 of 40,
   having passed 59 hand-written vectors. Eight rules of Nix were wrong or

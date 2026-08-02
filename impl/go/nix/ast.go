@@ -67,6 +67,14 @@ type IndStr struct{ Parts []Part }
 // PathLit is a path literal.
 type PathLit struct{ Text string }
 
+// PathInterp is a path containing an interpolation, ./x/${v}.nix.
+//
+// NOT a string: Nix models it as a concatenation whose first element is a
+// path, and prints it as (/abs/x/ + v + ".nix"). The parts use the same
+// Lit/Anti shape as a string's, with the leading path carried as an Anti of a
+// PathLit so it prints bare.
+type PathInterp struct{ Parts []Part }
+
 // SearchPath is <nixpkgs>.
 type SearchPath struct{ Text string }
 
@@ -153,6 +161,7 @@ func (Float) isExpr()      {}
 func (Str) isExpr()        {}
 func (IndStr) isExpr()     {}
 func (PathLit) isExpr()    {}
+func (PathInterp) isExpr() {}
 func (SearchPath) isExpr() {}
 func (URI) isExpr()        {}
 func (Var) isExpr()        {}
@@ -192,11 +201,20 @@ type Attr interface {
 // ID is an attribute named by an identifier, a.
 type ID struct{ Name string }
 
-// StrAttr is an attribute named by a string or interpolation, ."a" or .${e}.
+// StrAttr is an attribute named by a STRING literal, ."a".
 type StrAttr struct{ Parts []Part }
+
+// DynAttr is an attribute named by an expression DIRECTLY, .${e}.
+//
+// Distinct from a StrAttr holding one antiquotation, which is ."${e}", because
+// Nix keeps them apart and prints them differently: a.${k} prints as
+// (a)."${k}" while { "${k}" = 1; } prints as { "${(k)}" = 1; }. The
+// parentheses are the string wrapper showing through.
+type DynAttr struct{ Expr Expr }
 
 func (ID) isAttr()      {}
 func (StrAttr) isAttr() {}
+func (DynAttr) isAttr() {}
 
 // AttrPath is a.b.c.
 type AttrPath []Attr
