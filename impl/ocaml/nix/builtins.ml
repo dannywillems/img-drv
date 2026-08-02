@@ -117,16 +117,24 @@ let to_string_primop args =
 
 let string_length_primop args = Value.Int (String.length (want_string 0 args))
 
-(** [substring start len s]. Nix CLAMPS rather than raising: a start past the
-    end gives the empty string and an over-long length is truncated. [lib] leans
-    on that, so raising here would break real code. *)
+(** [substring start len s]. Three behaviours, none of which is an error.
+
+    Nix CLAMPS rather than raising: a start past the end gives the empty string
+    and an over-long length is truncated. And a NEGATIVE length means "to the
+    end of the string", not "empty": [lib.removePrefix] is written as
+    [substring (stringLength prefix) (-1) str], so an implementation that
+    treats a negative length as empty silently turns every [removePrefix] into
+    the empty string. That is how this was found, against real nixpkgs lib, and
+    it is the second clamping detail in one function to matter. *)
 let substring_primop args =
   let start = want_int 0 args and len = want_int 1 args in
   let s, ctx = want_string_ctx 2 args in
   let n = String.length s in
   let start = max 0 start in
-  if start >= n || len < 0 then Str ("", ctx)
-  else Str (String.sub s start (min len (n - start)), ctx)
+  if start >= n then Str ("", ctx)
+  else
+    let avail = n - start in
+    Str (String.sub s start (if len < 0 then avail else min len avail), ctx)
 
 let concat_strings_sep_primop args =
   let sep, sctx = want_string_ctx 0 args in

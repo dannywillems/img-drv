@@ -117,6 +117,10 @@ canonical-check: ## Canonicalizing a real derivation must change nothing
 corpus: ## Pull N random nixpkgs packages and verify against them (needs docker)
 	./scripts/fetch-corpus.sh $(N)
 
+.PHONY: lib-check
+lib-check: ## Real nixpkgs lib, through our evaluator, vs nix-instantiate
+	./scripts/lib-check.sh $(IMPLS)
+
 .PHONY: eval-check
 eval-check: ## Evaluate real .nix source; the .drv must match nix-instantiate
 	./scripts/eval-check.sh $(IMPLS)

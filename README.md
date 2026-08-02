@@ -115,6 +115,7 @@ real Nix.
 | `make differential`    | a live closure's paths, against pinned Nix            | **7 of 7**                    |
 | `make nar-check`       | source paths via our own NAR, vs `nix-store --add`     | **5 of 5 x 4**                |
 | `make eval-check`      | real `.nix`, evaluated by us, vs `nix-instantiate`     | **12 of 12** (OCaml)          |
+| `make lib-check`       | real nixpkgs `lib`, through our evaluator             | **byte-identical** (OCaml)    |
 
 Both arrows between the Nix language and its syntax tree exist in all four
 languages, and the arrow from that tree to the IR now exists in OCaml: a real

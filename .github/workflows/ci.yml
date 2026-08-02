@@ -134,6 +134,25 @@ jobs:
       # that already passed 59 hand-written vectors.
       - run: make nixpkgs-parse N=300 IMPLS='ocaml python rust go'
 
+  lib-check:
+    name: real nixpkgs lib, through our evaluator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # Every other gate runs on input this project wrote. This one runs on
+      # tens of thousands of lines of Nix that nobody here designed, and it is
+      # the first input to the evaluator not chosen to be evaluable. The parser
+      # learned the same lesson the same way: a curated corpus tells you about
+      # the curator.
+      #
+      # It found a real bug on its first run. Nix's `substring` treats a
+      # NEGATIVE length as "to the end of the string", and lib.removePrefix is
+      # written as `substring (stringLength prefix) (-1) str`, so treating it
+      # as "empty" silently turns every removePrefix into "".
+      - run: make lib-check
+
   eval-check:
     name: real .nix source, evaluated by us, byte for byte
     runs-on: ubuntu-latest
