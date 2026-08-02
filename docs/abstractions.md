@@ -939,3 +939,93 @@ NAR bytes, their hash, the `source` path, the `inputSrcs` field, and the
 Bananas, Lenses, Envelopes and Barbed Wire* (FPCA 1991) for catamorphisms and
 the uniqueness argument; Dolstra, *The Purely Functional Software Deployment
 Model* (2006), figure 5.2, for the NAR grammar itself.
+
+## 18. The evaluator is a quotient, not a fold, and the edges are a homomorphism
+
+**Structure:** second-order algebraic theory (Fiore-Plotkin-Turi), quotiented
+onto a first-order one; plus a monoid homomorphism that computes the dependency
+graph. `impl/ocaml/nix/derivation_primop.ml`, gated by `make eval-check`.
+
+Entry 17 said NAR was easy BECAUSE it was a catamorphism: unique homomorphism
+out of an initial algebra, hence no freedom, hence four implementations
+agreeing on the first run. It is worth being precise about why `eval` cannot be
+that, because the difference explains the shape of the whole front end.
+
+**`Expr` is not the initial algebra of a polynomial functor.** It has BINDERS.
+`lambda`, `let`, `rec` and `with` bind names, and a set-valued functor cannot
+express "a term with one more free variable". The right home is a presheaf
+category over the category of finite contexts and renamings, where the initial
+algebra of the syntax functor gives capture-avoiding substitution for free.
+That is Fiore, Plotkin and Turi's *Abstract Syntax and Variable Binding* (LICS
+1999), and it is the same object as a SECOND-ORDER algebraic theory: a Lawvere
+theory whose operations may bind.
+
+`docs/spec/signature.md` has no binders at all. It is an ordinary first-order
+signature, and `Drv` is its initial algebra. So
+
+```
+eval : (second-order theory)  -->  (first-order theory)
+```
+
+is the map that COLLAPSES the binding structure. By the time a value reaches
+`Edsl.derive`, every variable, scope, closure and thunk must be gone. That
+collapse is the entire content of the front end, and it is why the evaluator
+is the only arrow in the project that is not structural: there is no
+uniqueness theorem to lean on, so it is verified by bytes instead.
+
+**The dependency edges are a homomorphism, and that is the real discovery.**
+In the four eDSLs, `input_drvs` is an ARGUMENT: the caller writes the edge, and
+a caller who forgets it gets a derivation that is well formed and wrong. In the
+Nix language nobody writes it. A string is not an element of `Sigma*`; it is an
+element of
+
+```
+Sigma* x P_fin(ctx_elem)
+```
+
+the product of the free monoid on characters with the free join-semilattice on
+context elements, and `context` is the projection, which is a monoid
+homomorphism:
+
+```
+context (a ^ b) = context a UNION context b
+```
+
+`derivation` is then the join-semilattice homomorphism out of that, partitioning
+by constructor: `Opaque -> inputSrcs`, `Built (out, drv) -> inputDrvs`. So the
+dependency graph is not read from anywhere. It is COMPUTED, by a
+structure-preserving map, which is why interpolating a derivation nine levels
+deep inside a list inside a concatenation still produces the edge. A
+homomorphism cannot lose what it is defined on.
+
+That is the answer to a question the plan had left open: what does the front
+end need that `signature.md` does not have? Exactly this. A signature that
+describes derivations cannot describe an evaluator, because the evaluator's
+carrier for strings is a different object from `string`.
+
+**Three cases, not a string with a sigil.** Nix serializes context elements as
+`/nix/store/x`, `!out!/nix/store/y.drv`, `=/nix/store/z.drv`. Writing them as a
+variant rather than as sigil-prefixed strings is not a style preference: the
+three mean three different things to a derivation, and a sigil that is
+mis-parsed becomes the wrong KIND of edge silently, producing a derivation of
+the right shape with the wrong identity.
+
+**How it is verified.** `make eval-check` reads two real `.nix` files, evaluates
+them with our evaluator, and diffs the whole resulting closure against a live
+`nix-instantiate`, byte for byte. Six of six. This is stronger than a unit test
+on the evaluator could be: a lost edge cannot show up as a subtly wrong tree,
+because the edge feeds the input hash, which feeds the store path. It shows up
+as a different filename or it does not show up at all.
+
+**The invariant that caught the first version.** `Edsl.derive` REFUSES a caller
+that passes `name`, `system`, `builder` or `outputs` as environment entries,
+because it synthesizes those itself (`docs/spec/canonical.md` section 1.7). The
+first `derivation` primop passed them twice, and the IR's own refusal is what
+said so. A constructor that rejects a redundant argument is worth more than one
+that helpfully merges it.
+
+**To learn more:** Fiore, Plotkin and Turi, *Abstract Syntax and Variable
+Binding* (LICS 1999); Fiore and Hur, *Second-Order Equational Logic* (CSL
+2010); and for the fixed-point reading of laziness, any treatment of Kleene
+iteration on a domain, where a blackhole is exactly the detection that the
+iteration is not ascending.

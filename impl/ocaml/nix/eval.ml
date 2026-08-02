@@ -25,6 +25,19 @@ and lookup_with withs x =
           match attrs_find a x with Some t -> t | None -> lookup_with rest x)
       | v -> error "value is %s while a set was expected" (type_name v))
 
+(** How a path literal becomes a store path.
+
+    Injected rather than called directly: the copy needs a filesystem walk, and
+    keeping it behind a reference is what lets the evaluator stay testable
+    without one and the library stay dependency-free. The default is an error
+    rather than a silent identity, because silently treating [./x] as the
+    string [./x] would produce a derivation of the right shape with the wrong
+    inputSrcs, which is the failure mode docs/spec/store-paths.md warns about.
+
+    The CLI sets it to the real thing, using {!Img_drv.Nar}. *)
+let add_to_store : (string -> string * Context.t) ref =
+  ref (fun p -> error "cannot add %s to the store: no store is wired up" p)
+
 (** Coerce to a string the way an attribute of a derivation is coerced.
 
     Nix's rules, and they are not obvious: a Boolean becomes ["1"] or the empty
@@ -39,7 +52,13 @@ let rec coerce_to_string ?(list_ok = true) (v : value) : string * Context.t =
   | Bool true -> ("1", Context.empty)
   | Bool false -> ("", Context.empty)
   | Null -> ("", Context.empty)
-  | Path p -> (p, Context.empty)
+  | Path p ->
+      (* A path literal coerced to a string is COPIED INTO THE STORE, and the
+         resulting string carries that store path in its context, which is what
+         puts it in inputSrcs. The copy needs NAR and a filesystem, and this
+         library has neither on purpose (the OCaml IR core has zero
+         dependencies and the walk lives in the CLI), so it is injected. *)
+      !add_to_store p
   | List items when list_ok ->
       let parts =
         List.map (fun t -> coerce_to_string ~list_ok:false (force t)) items

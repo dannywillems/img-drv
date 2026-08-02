@@ -114,17 +114,26 @@ real Nix.
 | `make nixpkgs-parse`   | our parse tree equals `nix-instantiate --parse`       | **all four languages**        |
 | `make differential`    | a live closure's paths, against pinned Nix            | **7 of 7**                    |
 | `make nar-check`       | source paths via our own NAR, vs `nix-store --add`     | **5 of 5 x 4**                |
+| `make eval-check`      | real `.nix`, evaluated by us, vs `nix-instantiate`     | **6 of 6** (OCaml)            |
 
-Both arrows between the Nix language and its syntax tree now exist, in all four
-languages. The arrow from that tree to the IR does NOT: there is no
-`derivation` primop yet, so a real package can be read and written but not yet
-turned into a derivation.
+Both arrows between the Nix language and its syntax tree exist in all four
+languages, and the arrow from that tree to the IR now exists in OCaml: a real
+`.nix` file is read, evaluated, and the derivations it produces are
+byte-identical to what `nix-instantiate` writes. What is missing is BREADTH,
+not the seam: the `builtins` a nixpkgs package reaches, and the same evaluator
+in the other three languages.
+
+The part with no analogue in the eDSLs is where the dependency edges come from.
+An eDSL caller passes `input_drvs` by hand. The evaluator computes them: a Nix
+string carries a CONTEXT, concatenation unions contexts, and `derivation`
+partitions that context into `inputSrcs` and `inputDrvs`. The graph is a
+homomorphism, not an argument.
 
 ```
-   .nix text  --parse-->  EXPR  - - eval - >  DRV  --hash-->  store path
-              <--emit---              ^
-                                      |
-                                 not built yet
+   .nix text  --parse-->  EXPR  --eval-->  DRV  --hash-->  store path
+              <--emit---            ^
+                                    |
+                          OCaml only, 6 of 6 vs nix
 ```
 
 Four results worth stating on their own.

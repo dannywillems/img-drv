@@ -134,6 +134,24 @@ jobs:
       # that already passed 59 hand-written vectors.
       - run: make nixpkgs-parse N=300 IMPLS='ocaml python rust go'
 
+  eval-check:
+    name: real .nix source, evaluated by us, byte for byte
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # The arrow the project exists to build: text -> parse -> eval -> .drv,
+      # with no eDSL anywhere in it. Diffed against a live nix-instantiate over
+      # the WHOLE closure, because a dependency is a derivation too and a lost
+      # edge shows up in its bytes as readily as in the top one's.
+      #
+      # Dependency edges are never written by the caller here. They are
+      # computed by the string-context homomorphism, so an edge that is quietly
+      # dropped moves an input hash and therefore a store path, and cannot show
+      # up as anything subtler.
+      - run: make eval-check
+
   nar-check:
     name: NAR, and a derivation with inputSrcs
     runs-on: ubuntu-latest

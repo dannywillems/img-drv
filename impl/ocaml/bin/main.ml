@@ -157,6 +157,53 @@ let source_paths directory =
         (Types.Store_path.to_string (Nar.source_path ~name fso))) ;
   0
 
+(** Evaluate a real [.nix] file and write every derivation it produces.
+
+    The arrow the project existed to build, end to end and with no eDSL
+    anywhere in it: TEXT -> parse -> EXPR -> eval -> DRV -> bytes. The gate is
+    scripts/eval-check.sh, which asks a live nix-instantiate for the same file
+    and diffs the [.drv] files byte for byte.
+
+    Nothing here decides anything. It wires the store hook (a path literal has
+    to be COPIED to the store, which needs NAR and a filesystem, neither of
+    which the evaluator library has) and then writes what evaluation produced. *)
+let eval_file directory =
+  let file = Sys.getenv "EVAL_FILE" in
+  let base = Filename.dirname file in
+  (* The one injection: a path literal becomes a store path, and the string
+     that results carries it in its context, which is what puts it in
+     inputSrcs. *)
+  (Img_drv_nix.Eval.add_to_store :=
+     fun p ->
+       let path =
+         Nar.source_path ~name:(Filename.basename p) (read_fso p)
+         |> Types.Store_path.to_string
+       in
+       ( path,
+         Img_drv_nix.Value.Context.singleton (Img_drv_nix.Value.Opaque path) )) ;
+  Img_drv_nix.Derivation_primop.reset () ;
+  match
+    Img_drv_nix.Builtins.eval_file
+      ~base
+      ~home:(Option.value (Sys.getenv_opt "HOME") ~default:"/root")
+      (read_file file)
+  with
+  | Error e ->
+      prerr_endline e ;
+      1
+  | Ok _ ->
+      (* Every derivation reached during evaluation, not merely the one the
+         expression returned: a dependency is a derivation too, and Nix writes
+         the whole closure. *)
+      let n = ref 0 in
+      Hashtbl.iter
+        (fun _ (d : Edsl.drv) ->
+          incr n ;
+          ignore (Edsl.write d directory))
+        Img_drv_nix.Derivation_primop.store ;
+      Printf.printf "%d derivations\n" !n ;
+      0
+
 (** Emit the derivation that depends on [scripts/probe-src.txt].
 
     Exercises the whole chain: NAR bytes, their hash, the [source] store path,
@@ -401,6 +448,7 @@ let () =
         | "probe" -> emit_probe directory
         | "source" -> source_paths directory
         | "srcdrv" -> emit_srcdrv directory
+        | "eval" -> eval_file directory
         | other ->
             Printf.eprintf "unknown command: %s\n" other ;
             exit 2

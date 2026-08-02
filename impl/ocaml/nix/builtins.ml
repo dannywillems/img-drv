@@ -1,11 +1,9 @@
 (** The global scope, and the builtins an expression can reach.
 
-    The [derivation] primop is deliberately NOT here yet. It is the seam
-    between the language and the IR, and where that seam belongs is exactly
-    what `docs/transpiling.md` reopens: if the goal is to WRITE Nix expressions
-    from a host language and print `.nix`, then evaluation is one arrow out of
-    the expression algebra and printing is another, and the primop should hang
-    off the settled architecture rather than be wired in ahead of it. *)
+    [derivation] lives in {!Derivation_primop}, which is where the language
+    meets the IR. It is the only primop that can PRODUCE a store path, so it is
+    the only one whose correctness is checkable byte for byte against real Nix.
+    Everything here is ordinary. *)
 
 open Value
 
@@ -43,6 +41,9 @@ let global_env () : env =
       primop "isNull" 1 is_null_primop;
       primop "length" 1 length_primop;
       primop "attrNames" 1 attr_names_primop;
+      (* The seam. See derivation_primop.ml. *)
+      primop "derivation" 1 Derivation_primop.derivation_primop;
+      primop "derivationStrict" 1 Derivation_primop.derivation_primop;
       ("true", lazy (Bool true));
       ("false", lazy (Bool false));
       ("null", lazy Null);
@@ -55,7 +56,16 @@ let global_env () : env =
     withs = [];
   }
 
-(** Evaluate a Nix expression in the global scope. *)
+(** Evaluate a Nix expression in the global scope.
+
+    [base] is the directory relative paths resolve against, which Nix takes
+    from the file the expression was written in. *)
+let eval_file ?base ?home (src : string) : (value, string) result =
+  match Nix.parse_string ?base ?home src with
+  | Error e -> Error e
+  | Ok ast -> (
+      try Ok (Eval.eval (global_env ()) ast) with Eval_error e -> Error e)
+
 let eval_string (src : string) : (value, string) result =
   match Nix.parse_string src with
   | Error e -> Error e

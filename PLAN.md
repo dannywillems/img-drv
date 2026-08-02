@@ -20,10 +20,15 @@ How it is used:
 
 Ordered. The top item is the next thing to do.
 
-1. **The EVALUATOR**, so a real nixpkgs package can be READ and not merely
-   re-emitted. Parsing is the easy half and is nearly done; the evaluator has
-   no `derivation` primop yet, and without one no parsed package can become
-   IR. This is where `import`, laziness and string contexts arrive.
+1. **The evaluator, WIDENED.** The seam now exists in OCaml and is verified
+   byte for byte (see State), so the remaining work is breadth rather than
+   design: the `builtins` a real package reaches (`import`, `map`,
+   `listToAttrs`, `getAttr`, `foldl'`, the string and list families),
+   `<nixpkgs>` search paths, and then enough of `lib` and `stdenv` to evaluate
+   one real package.
+2. **Port the evaluator to Python, Rust and Go.** Deliberately AFTER widening
+   it in one language: the parser was ported once its eight bug classes were
+   written down as a specification, and the same discipline applies here.
 
 Done and no longer on this list: NAR serialization and `inputSrcs`, which was
 the last unspecified corner of the format and the one gap in the `.drv` path
@@ -36,6 +41,14 @@ rule. See the State entry below.
 - [x] Signature drafted (`docs/spec/signature.md`).
 - [x] Serialization derived EMPIRICALLY from real Nix, with golden files
       (`docs/spec/canonical.md`, `docs/spec/examples/`).
+- [x] The EVALUATOR seam, in OCaml. `derivation` as a primop emitting the IR,
+      with laziness on `Lazy.t` (blackholing free, since `Lazy.Undefined` is
+      exactly "infinite recursion encountered") and string contexts as a
+      three-case variant. `make eval-check` reads two real `.nix` files,
+      evaluates them, and diffs the WHOLE resulting closure against a live
+      `nix-instantiate`: 6 of 6 byte-identical. The dependency edges are not
+      supplied by the caller as they are in the eDSLs; they are computed by the
+      string-context homomorphism (`docs/abstractions.md` entry 18).
 - [x] NAR, in four languages, written as a catamorphism over the filesystem
       object rather than as a directory walk (`docs/spec/canonical.md` section
       3, `docs/abstractions.md` entry 17). `make nar-check` diffs five source

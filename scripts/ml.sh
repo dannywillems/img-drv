@@ -33,6 +33,7 @@ exec docker run --rm \
   -v img-drv-opam:/home/opam/.opam \
   --user root \
   -e OPAMROOT=/home/opam/.opam \
+  -e EVAL_FILE="${EVAL_FILE:-/w/scripts/probe.nix}" \
   "$ML_IMAGE" sh -c "
     eval \$(opam env --root=/home/opam/.opam) &&
     opam install -y --no-depexts $ML_PACKAGES >/dev/null 2>&1 || true
