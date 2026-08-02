@@ -7,6 +7,7 @@
 //! img-drv examples <dir>    emit the conformance corpus
 //! img-drv transpile <dir>   emit the same corpus as .nix source
 //! img-drv parsecheck <dir>  parse real .nix files, diff the tree
+//! img-drv reparse <dir>     parse what we emitted; must be the same tree
 //! ```
 //!
 //! All exit non-zero on any failure, which is what makes them usable as CI
@@ -24,7 +25,7 @@ fn main() -> ExitCode {
     let [command, directory] = args.as_slice() else {
         eprintln!(
             "usage: img-drv \
-             [verify|roundtrip|canonical|examples|transpile|parsecheck] <dir>"
+             [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse] <dir>"
         );
         return ExitCode::from(2);
     };
@@ -40,6 +41,7 @@ fn main() -> ExitCode {
         "examples" => emit_examples(&directory),
         "transpile" => transpile(&directory),
         "parsecheck" => parsecheck(&directory),
+        "reparse" => reparse(&directory),
         other => {
             eprintln!("unknown command: {other}");
             return ExitCode::from(2);
@@ -236,4 +238,69 @@ fn report(origin: &str, want: &str, got: &str) {
     println!("MISMATCH {origin} (at offset {d})");
     println!("  want ...{}...", window(want));
     println!("  got  ...{}...", window(got));
+}
+
+/// The RETRACTION law: parsing what we printed gives back the same tree.
+///
+/// `emit` and `parse` are the two arrows between EXPR and source text, and
+/// their law is `parse(emit(e)) == e`, up to the three semantic no-ops named in
+/// [`img_drv::nix::normalize`]. That makes `emit . parse` idempotent: a
+/// canonical-form projection on source text.
+///
+/// It is nearly free, because every file in the parser's corpus is a term to
+/// test `emit` on, and it moves that corpus from the arrow that was already
+/// well-tested to the one that was not.
+fn reparse(directory: &Path) -> Outcome {
+    let home = std::fs::read_to_string(directory.join("home"))
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    let mut sources: Vec<PathBuf> = std::fs::read_dir(directory)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|e| e == "nix"))
+        .collect();
+    sources.sort();
+
+    let (mut ok, mut bad) = (0usize, 0usize);
+    for source_path in &sources {
+        let stem = source_path.with_extension("");
+        let origin = std::fs::read_to_string(stem.with_extension("path"))
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let base = Path::new(&origin)
+            .parent()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        let source = std::fs::read_to_string(source_path)?;
+        let Ok(tree) = img_drv::nix::parse(&source, &base, &home) else {
+            continue;
+        };
+        let printed = img_drv::nix::to_nix(&tree);
+        match img_drv::nix::parse(&printed, &base, &home) {
+            Err(e) => {
+                bad += 1;
+                if bad <= 5 {
+                    println!("EMITTED SOURCE DOES NOT PARSE {origin}: {e}");
+                }
+            }
+            Ok(again) => {
+                let norm = img_drv::nix::normalize::expr;
+                if norm(&again) == norm(&tree) {
+                    ok += 1;
+                } else {
+                    bad += 1;
+                    if bad <= 5 {
+                        println!("ROUND TRIP DIFFERS {origin}");
+                    }
+                }
+            }
+        }
+    }
+    println!(
+        "{ok}/{} real expressions survive emit then parse unchanged",
+        ok + bad
+    );
+    Ok(u8::from(bad > 0))
 }

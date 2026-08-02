@@ -20,7 +20,7 @@ REPO="$(cd "$HERE/.." && pwd)"
 # menhir, LALRPOP and goyacc is a runtime dependency because it builds its
 # tables at import time, so it is installed only for the command that uses it.
 NEEDS_PLY=""
-if [ "${1:-}" = "parsecheck" ]; then
+if [ "${1:-}" = "parsecheck" ] || [ "${1:-}" = "reparse" ]; then
   NEEDS_PLY="pip install --quiet --no-input --disable-pip-version-check --root-user-action=ignore ply &&"
 fi
 

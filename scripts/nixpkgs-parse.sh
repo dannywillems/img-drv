@@ -37,7 +37,7 @@ set -euo pipefail
 COUNT="${1:-300}"
 shift || true
 if [ "$#" -eq 0 ]; then
-  set -- ocaml python rust
+  set -- ocaml python rust go
 fi
 
 # A case rather than an associative array: macOS ships bash 3.2.
@@ -125,11 +125,7 @@ done
 # ELEVEN hand-written intents while the parser was checked on thousands of real
 # files. It found two real bugs on its first run, one of them semantic.
 for impl in "$@"; do
-  case "$impl" in
-    ocaml)
-      echo ">> $impl re-parses what it emitted (the retraction law)"
-      "$HERE/$(runner_for "$impl")" reparse "$REL" || fail=1
-      ;;
-  esac
+  echo ">> $impl re-parses what it emitted (the retraction law)"
+  "$HERE/$(runner_for "$impl")" reparse "$REL" || fail=1
 done
 [ "$fail" -eq 0 ]

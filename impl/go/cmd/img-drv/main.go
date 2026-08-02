@@ -7,6 +7,7 @@
 //	img-drv examples <dir>    emit the conformance corpus
 //	img-drv transpile <dir>   emit the same corpus as .nix source
 //	img-drv parsecheck <dir>  parse real .nix files, diff the tree
+//	img-drv reparse <dir>     parse what we emitted; must be the same tree
 //
 // All exit non-zero on any failure, which is what makes them usable as CI
 // gates. The subcommands and their output match the Python and Rust
@@ -17,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -26,7 +28,7 @@ import (
 
 func main() {
 	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: img-drv [verify|roundtrip|canonical|examples|transpile|parsecheck] <dir>")
+		fmt.Fprintln(os.Stderr, "usage: img-drv [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse] <dir>")
 		os.Exit(2)
 	}
 	command, directory := os.Args[1], os.Args[2]
@@ -51,6 +53,8 @@ func main() {
 		code, err = transpile(directory)
 	case "parsecheck":
 		code, err = parsecheck(directory)
+	case "reparse":
+		code, err = reparse(directory)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", command)
 		os.Exit(2)
@@ -230,6 +234,75 @@ func parsecheck(directory string) (int, error) {
 		}
 	}
 	fmt.Printf("%d/%d real nixpkgs expressions parse to the same tree as Nix\n",
+		ok, ok+bad)
+	if bad > 0 {
+		return 1, nil
+	}
+	return 0, nil
+}
+
+// reparse checks the RETRACTION law: parsing what we printed gives the same
+// tree.
+//
+// emit and parse are the two arrows between EXPR and source text, and their law
+// is parse(emit(e)) == e, up to the three semantic no-ops named in
+// nix/normalize.go. That makes emit . parse idempotent: a canonical-form
+// projection on source text.
+//
+// It is nearly free, because every file in the parser's corpus is a term to
+// test emit on, and it moves that corpus from the arrow that was already
+// well-tested to the one that was not.
+func reparse(directory string) (int, error) {
+	home := ""
+	if b, err := os.ReadFile(filepath.Join(directory, "home")); err == nil {
+		home = strings.TrimSpace(string(b))
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return 0, err
+	}
+	names := []string{}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".nix") {
+			names = append(names, strings.TrimSuffix(e.Name(), ".nix"))
+		}
+	}
+	sort.Strings(names)
+
+	ok, bad := 0, 0
+	for _, base := range names {
+		origin := base
+		if b, err := os.ReadFile(filepath.Join(directory, base+".path")); err == nil {
+			origin = strings.TrimSpace(string(b))
+		}
+		src, err := os.ReadFile(filepath.Join(directory, base+".nix"))
+		if err != nil {
+			return 0, err
+		}
+		dir := filepath.Dir(origin)
+		tree, perr := nix.Parse(string(src), dir, home)
+		if perr != nil {
+			continue
+		}
+		printed := nix.ToNix(tree)
+		again, perr := nix.Parse(printed, dir, home)
+		if perr != nil {
+			bad++
+			if bad <= 5 {
+				fmt.Printf("EMITTED SOURCE DOES NOT PARSE %s: %v\n", origin, perr)
+			}
+			continue
+		}
+		if reflect.DeepEqual(nix.Normalize(again), nix.Normalize(tree)) {
+			ok++
+			continue
+		}
+		bad++
+		if bad <= 5 {
+			fmt.Printf("ROUND TRIP DIFFERS %s\n", origin)
+		}
+	}
+	fmt.Printf("%d/%d real expressions survive emit then parse unchanged\n",
 		ok, ok+bad)
 	if bad > 0 {
 		return 1, nil

@@ -17,6 +17,7 @@ pub mod ast;
 pub mod emit;
 pub mod lexer;
 pub mod mk;
+pub mod normalize;
 pub mod paths;
 pub mod printer;
 pub mod strings;

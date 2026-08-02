@@ -7,6 +7,7 @@
     python -m img_drv examples <dir>    emit the conformance corpus
     python -m img_drv transpile <dir>   emit the same corpus as .nix source
     python -m img_drv parsecheck <dir>  parse real .nix files, diff the tree
+    python -m img_drv reparse <dir>     parse what we emitted; must be the same
 
 All exit non-zero on any failure, which is what makes them usable as CI
 gates. `examples` is what `make conformance` drives: each implementation
@@ -181,12 +182,62 @@ def parsecheck(directory: pathlib.Path) -> int:
     return 1 if bad else 0
 
 
+def reparse(directory: pathlib.Path) -> int:
+    """The RETRACTION law: parsing what we printed gives back the same tree.
+
+    `emit` and `parse` are the two arrows between EXPR and source text, and
+    their law is `parse(emit(e)) == e`, up to the three semantic no-ops named
+    in `img_drv.nix.normalize`. That makes `emit . parse` idempotent: a
+    canonical-form projection on source text.
+
+    It is nearly free, because every file in the parser's corpus is a term to
+    test `emit` on, and it moves that corpus from the arrow that was already
+    well-tested to the one that was not.
+    """
+    from .nix import normalize  # noqa: PLC0415
+    from .nix.emit import to_nix  # noqa: PLC0415
+    from .nix.parser import parse as parse_nix  # noqa: PLC0415
+
+    home_file = directory / "home"
+    home = home_file.read_text().strip() if home_file.exists() else ""
+    ok = bad = 0
+    for source_file in sorted(directory.glob("*.nix")):
+        base = source_file.with_suffix("")
+        path_file = base.with_suffix(".path")
+        origin = (
+            path_file.read_text().strip() if path_file.exists() else base.name
+        )
+        parent = str(pathlib.PurePosixPath(origin).parent)
+        try:
+            tree = parse_nix(source_file.read_text(), base=parent, home=home)
+        except (SyntaxError, RecursionError):
+            continue
+        printed = to_nix(tree)
+        try:
+            again = parse_nix(printed, base=parent, home=home)
+        except (SyntaxError, RecursionError) as e:
+            bad += 1
+            if bad <= 5:
+                print(f"EMITTED SOURCE DOES NOT PARSE {origin}: {e}")
+            continue
+        if normalize.expr(again) == normalize.expr(tree):
+            ok += 1
+        else:
+            bad += 1
+            if bad <= 5:
+                print(f"ROUND TRIP DIFFERS {origin}")
+    total = ok + bad
+    print(f"{ok}/{total} real expressions survive emit then parse unchanged")
+    return 1 if bad else 0
+
+
 COMMANDS = {
     "verify": verify,
     "roundtrip": roundtrip,
     "canonical": canonical_check,
     "transpile": transpile,
     "parsecheck": parsecheck,
+    "reparse": reparse,
     "drvpaths": drvpaths,
     "examples": examples,
 }
