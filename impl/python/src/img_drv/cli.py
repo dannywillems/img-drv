@@ -3,6 +3,7 @@
     python -m img_drv verify <dir>      recompute every store path
     python -m img_drv roundtrip <dir>   parse then re-serialize, byte for byte
     python -m img_drv canonical <dir>   canonicalizing must change nothing
+    python -m img_drv drvpaths <dir>    recompute each .drv's own store path
     python -m img_drv examples <dir>    emit the conformance corpus
 
 All exit non-zero on any failure, which is what makes them usable as CI
@@ -86,10 +87,26 @@ def examples(directory: pathlib.Path) -> int:
     return 0
 
 
+def drvpaths(directory: pathlib.Path) -> int:
+    """Recompute each derivation's own `.drv` path from its bytes.
+
+    The corpus filenames are real Nix store paths, which makes this a free
+    check nothing performed until the transpiler's commuting square found the
+    gap.
+    """
+    corpus = Corpus.from_directory(directory)
+    checked, bad = corpus.verify_drv_paths()
+    for m in bad:
+        print(f"FAIL {m}")
+    print(f"{checked - len(bad)}/{checked} .drv paths recomputed from bytes")
+    return 1 if bad else 0
+
+
 COMMANDS = {
     "verify": verify,
     "roundtrip": roundtrip,
     "canonical": canonical_check,
+    "drvpaths": drvpaths,
     "examples": examples,
 }
 

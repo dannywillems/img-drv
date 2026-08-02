@@ -26,6 +26,7 @@ from .derivation import Derivation, OutputName, Sha256Hex, StorePath
 from .store import (
     BASE32_ALPHABET,
     STORE,
+    drv_path,
     fixed_output_input_hash,
     output_paths,
     sha256_hex,
@@ -135,6 +136,35 @@ class Corpus:
         return output_paths(
             drv, name_from_path(path, drv), self.input_hashes_of(drv)
         )
+
+    def verify_drv_paths(self) -> tuple[int, list[Mismatch]]:
+        """Recompute each derivation's OWN `.drv` path and compare.
+
+        The corpus filenames are real Nix store paths, so this is 1458 free
+        vectors that nothing checked until the transpiler's commuting square
+        exposed the gap. It matters because a `.drv` is a `text` store object
+        whose fingerprint includes the paths it REFERENCES, and omitting them
+        is right only for a derivation with no inputs.
+        """
+        checked = 0
+        bad: list[Mismatch] = []
+        for path, drv in sorted(self.drvs.items()):
+            checked += 1
+            name = name_from_path(path, drv)
+            references = [str(i.path) for i in drv.input_drvs] + [
+                str(s) for s in drv.input_srcs
+            ]
+            got = drv_path(unparse(drv), name, references)
+            if got != path:
+                bad.append(
+                    Mismatch(
+                        drv_name=name,
+                        output=OutputName("<drv>"),
+                        expected=path,
+                        got=got,
+                    )
+                )
+        return checked, bad
 
     def verify(self) -> tuple[int, list[Mismatch]]:
         """Recompute every output path and compare with the recorded one.

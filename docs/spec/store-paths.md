@@ -2,16 +2,17 @@
 
 **Status: solved, and verified against real derivations.**
 
-- **1259 of 1259** output paths reproduced across **805 real nixpkgs
-  derivations** (the closures of git, python3, curl, openssl, cmake, sqlite).
-- **12 of 12** golden examples.
-- **805 of 805** round-trip byte-identically through the parser.
+- **2063 of 2063** output paths reproduced across a **1458-derivation** real
+  nixpkgs closure, 456 of them `__structuredAttrs`.
+- **1458 of 1458** `.drv` paths recomputed from the files' own bytes.
+- **11 of 11** golden examples, and **11 of 11** through real Nix end to end.
+- Every corpus derivation round-trips byte-identically through the parser.
 
 The history is kept deliberately. This document first said "solved and
 verified" on the strength of hand-written examples, which agreed 12 times out
-of 12. Real derivations then disagreed **323 times out of 403**. Two distinct
-bugs were hiding behind examples that never exercised them, and both are
-documented below under "The two that hid".
+of 12. Real derivations then disagreed **323 times out of 403**. Three distinct
+bugs have now hidden behind examples that never exercised them, and all three
+are documented below under "The three that hid".
 
 Nothing here came from memory. The manual does not document this, so each rule
 was established by reproducing known outputs and rejecting the variants that
@@ -47,12 +48,55 @@ gives a plausible-looking path that is wrong.
 
 ## The `.drv` path
 
-`kind` is `text`, and the inner hash is simply the sha256 of the derivation
-text, with the name suffixed `.drv`:
+A `.drv` file is a `text` store object, so the inner hash is the sha256 of the
+derivation text and the name is suffixed `.drv`. But `kind` is **not** the bare
+string `text`: a text store object's fingerprint also lists every store path the
+file REFERENCES, sorted, colon-separated, appended to the kind.
+
+For a derivation, the references are its `inputDrvs` and its `inputSrcs`:
 
 ```
-drv_path = store_path("text", sha256(aterm), name + ".drv")
+refs     = sorted(set(inputDrvs paths) | set(inputSrcs))
+kind     = "text"  if refs is empty
+           "text:" + ":".join(refs)  otherwise
+drv_path = store_path(kind, sha256(aterm), name + ".drv")
 ```
+
+The references are **not** in the outer `name` position and **not** in the inner
+hash; they sit between the kind and the literal `sha256`, so the full
+fingerprint of a derivation with two inputs reads:
+
+```
+text:/nix/store/aaa...-a.drv:/nix/store/bbb...-b.drv:sha256:<inner>:/nix/store:foo.drv
+```
+
+### Why this was wrong here for a long time
+
+Omitting the references is right for a derivation with **no inputs** and wrong
+for every other one, so a hand-written corpus of leaf derivations agrees with
+the broken rule perfectly. It survived `make conformance`, `make differential`,
+`make corpus` and `make spec-check` because each of those compared our
+computation against filenames we had also computed. Only the transpiler's
+commuting square asked **real Nix** what the path should be, and the answer
+differed.
+
+The measurement, against 1458 real nixpkgs `.drv` files whose filenames were
+chosen by real Nix:
+
+| rule               | paths reproduced |
+| ------------------ | ---------------- |
+| with references    | **1458 of 1458** |
+| without references | 149 of 1458      |
+
+The 149 are exactly the derivations with no inputs.
+
+Two files in `docs/spec/examples/` had to be RENAMED as part of the fix, because
+they had been named by our own wrong computation rather than by Nix. That is the
+general hazard of a golden corpus you generate yourself, and the reason
+`make transpile-check` exists.
+
+`make drvpath-check` now recomputes every corpus filename from its own bytes, so
+this class of error cannot return silently.
 
 ## Output paths, and the asymmetry that matters
 
@@ -62,7 +106,7 @@ and the difference is the single subtlest thing in this document:
 > **Mask your own outputs. Do not mask your inputs'.**
 
 - Computing a derivation's OWN output paths: serialize it with every output
-  path replaced by the empty string, in the outputs list *and* in `env`. They
+  path replaced by the empty string, in the outputs list _and_ in `env`. They
   must be masked because they are precisely what is being computed.
 - Using a derivation as an INPUT of another: serialize it with its output paths
   **intact**, so for a derivation with no inputs this is just the sha256 of its
@@ -116,19 +160,21 @@ against `nix-instantiate` exists to catch exactly this.
 
 ## Verified cases
 
-| case | what it pins down |
-| --- | --- |
-| `minimal` | the `text` kind, and the basic output path |
-| `ordering` | that env sorting does not disturb the hash |
-| `multi` | per-output names and the `-dev`/`-lib` suffix rule |
-| `fixed` | the fixed-output scheme |
-| `dep-a` | reconstructed from scratch; its computed paths match what `dependent.drv` refers to |
-| `dependent` | the mask/do-not-mask asymmetry |
+| case        | what it pins down                                                                   |
+| ----------- | ----------------------------------------------------------------------------------- |
+| `minimal`   | the `text` kind, and the basic output path                                          |
+| `ordering`  | that env sorting does not disturb the hash                                          |
+| `multi`     | per-output names and the `-dev`/`-lib` suffix rule                                  |
+| `fixed`     | the fixed-output scheme                                                             |
+| `dep-a`     | reconstructed from scratch; its computed paths match what `dependent.drv` refers to |
+| `dependent` | the mask/do-not-mask asymmetry                                                      |
 
-## The two that hid
+## The three that hid
 
-Both were invisible to hand-written examples, and both are the kind of thing
-that produces a plausible wrong answer rather than an error.
+All three were invisible to hand-written examples, and all three are the kind of
+thing that produces a plausible wrong answer rather than an error. The third is
+the sharpest, because it was invisible to the automated gates too; see
+`docs/abstractions.md` entry 10 for why.
 
 ### A fixed-output derivation has TWO different hash strings
 
@@ -172,3 +218,15 @@ hundred real ones contains it by accident.
       `inputSrcs` computed from local files rather than referenced by path.
 - [ ] Whether any of this shifts in newer Nix versions, which is the reason to
       pin the oracle.
+
+### A `.drv` path names what it references
+
+The `text` kind carries the sorted references, which are the derivation's
+`inputDrvs` and `inputSrcs`. Documented in full under "The `.drv` path" above.
+
+What makes this one different from the other two: they were caught the first
+time a REAL closure was run through the checker, which is exactly what that
+check is for. This one survived real closures, because no gate ever recomputed
+a derivation's own filename. Every gate compared our arithmetic against a name
+we had also chosen. The oracle that found it was the one that let Nix choose the
+name.

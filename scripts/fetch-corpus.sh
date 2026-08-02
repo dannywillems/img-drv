@@ -71,3 +71,10 @@ echo ">> store path check"
 # claim, rather than only the ten examples checked into docs/spec.
 echo ">> canonical form check (canonicalizing real derivations must be a no-op)"
 "$HERE/py.sh" canonical "$REL"
+
+# The corpus filenames ARE real Nix store paths, so recomputing them is free
+# verification. Nothing did it until the transpiler's commuting square exposed
+# that a .drv path includes the paths it REFERENCES; before that fix this check
+# passed on 149 of 1458.
+echo ">> .drv path check (each derivation's own store path, from its bytes)"
+"$HERE/py.sh" drvpaths "$REL"

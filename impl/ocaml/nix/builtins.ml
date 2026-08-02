@@ -49,7 +49,9 @@ let global_env () : env =
     ]
   in
   {
-    bindings = attrs_of_list (("builtins", lazy (Attrs (attrs_of_list entries))) :: entries);
+    bindings =
+      attrs_of_list
+        (("builtins", lazy (Attrs (attrs_of_list entries))) :: entries);
     withs = [];
   }
 
@@ -58,5 +60,4 @@ let eval_string (src : string) : (value, string) result =
   match Nix.parse_string src with
   | Error e -> Error e
   | Ok ast -> (
-      try Ok (Eval.eval (global_env ()) ast)
-      with Eval_error e -> Error e)
+      try Ok (Eval.eval (global_env ()) ast) with Eval_error e -> Error e)

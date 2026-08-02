@@ -781,6 +781,14 @@ pub fn derivation(b: Build) -> Result<Drv, InvalidDerivation> {
     }
 
     let aterm = unparse(&final_drv);
+    // The .drv file MENTIONS its inputs, so they are references of the store
+    // object and belong in its fingerprint. See store::drv_path.
+    let references: Vec<String> = final_drv
+        .input_drvs
+        .iter()
+        .map(|i| i.path.as_str().to_owned())
+        .chain(final_drv.input_srcs.iter().map(|s| s.as_str().to_owned()))
+        .collect();
     let input_hash = match final_drv.fixed_output() {
         Some(fixed) => fixed_output_input_hash(fixed),
         None => sha256_hex(&unparse_with(
@@ -792,7 +800,7 @@ pub fn derivation(b: Build) -> Result<Drv, InvalidDerivation> {
         )),
     };
     Ok(Drv {
-        path: drv_path(&aterm, &b.name),
+        path: drv_path(&aterm, &b.name, &references),
         derivation: final_drv,
         input_hash,
     })

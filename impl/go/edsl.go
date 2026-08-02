@@ -669,13 +669,22 @@ func Derive(b Build) (Drv, error) {
 	}
 
 	aterm := Unparse(final)
+	// The .drv file MENTIONS its inputs, so they are references of the store
+	// object and belong in its fingerprint. See DrvPath.
+	references := []string{}
+	for _, i := range final.InputDrvs {
+		references = append(references, string(i.Path))
+	}
+	for _, s := range final.InputSrcs {
+		references = append(references, string(s))
+	}
 	var inputHash Sha256Hex
 	if fixed, ok := final.FixedOutput(); ok {
 		inputHash = FixedOutputInputHash(fixed)
 	} else {
 		inputHash = SHA256Hex(UnparseWith(final, SerializeOptions{InputHashes: inputHashes}))
 	}
-	return Drv{derivation: final, path: DrvPath(aterm, b.Name), inputHash: inputHash}, nil
+	return Drv{derivation: final, path: DrvPath(aterm, b.Name, references), inputHash: inputHash}, nil
 }
 
 // MustDerive is Derive for a description known to be valid.

@@ -540,6 +540,14 @@ let derive (b : build) : (drv, error) result =
     }
   in
   let text = Aterm.unparse final in
+  (* The .drv file MENTIONS its inputs, so they are references of the store
+     object and belong in its fingerprint. See Store.drv_path. *)
+  let references =
+    List.map
+      (fun (i : Derivation.input_drv) -> Store_path.to_string i.path)
+      final.input_drvs
+    @ List.map Store_path.to_string final.input_srcs
+  in
   let input_hash =
     match Derivation.fixed_output final with
     | Some f -> Store.fixed_output_input_hash f
@@ -549,4 +557,9 @@ let derive (b : build) : (drv, error) result =
              final
              {Aterm.mask_outputs = false; input_hashes = Some input_hashes})
   in
-  Ok {derivation = final; path = Store.drv_path text name; input_hash}
+  Ok
+    {
+      derivation = final;
+      path = Store.drv_path ~references text name;
+      input_hash;
+    }

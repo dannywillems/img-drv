@@ -17,6 +17,10 @@ help: ## Ask for help!
 conformance: ## Assert every eDSL emits byte-identical IR (the whole point)
 	./scripts/conformance.sh
 
+.PHONY: transpile-check
+transpile-check: ## Our .nix, through real Nix, must give the golden .drv
+	./scripts/transpile-check.sh
+
 .PHONY: differential
 differential: ## Recompute a real Nix closure's store paths and compare
 	./scripts/differential.sh
@@ -78,6 +82,9 @@ ocaml-lint: ## Check OCaml formatting with ocamlformat
 ocaml-build: ## Build the OCaml implementation
 	./scripts/ml-check.sh build
 
+.PHONY: fmt
+fmt: format ## Alias for format
+
 .PHONY: format
 format: ## Format code
 	./scripts/py-check.sh format
@@ -97,6 +104,10 @@ spec-check: ## Recompute every golden store path from derivation text alone
 .PHONY: aterm-roundtrip
 aterm-roundtrip: ## Parse then re-serialize every .drv; must be byte-identical
 	./scripts/py.sh roundtrip $(DIR)
+
+.PHONY: drvpath-check
+drvpath-check: ## Recompute each .drv's own store path from its bytes
+	./scripts/py.sh drvpaths $(DIR)
 
 .PHONY: canonical-check
 canonical-check: ## Canonicalizing a real derivation must change nothing

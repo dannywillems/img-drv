@@ -383,7 +383,14 @@ let law_path_is_hash_of_bytes () =
       Alcotest.(check bool)
         "path"
         true
-        (Store_path.equal d.path (Store.drv_path (Edsl.aterm d) i.i_name)))
+        (let references =
+           List.map
+             (fun (e : Derivation.input_drv) -> Store_path.to_string e.path)
+             d.derivation.input_drvs
+         in
+         Store_path.equal
+           d.path
+           (Store.drv_path ~references (Edsl.aterm d) i.i_name)))
 
 let law_parser_reads_what_the_edsl_writes () =
   (* parse . unparse = id holds everywhere; unparse . parse = id holds only on

@@ -5,6 +5,7 @@
     img-drv roundtrip <dir>   parse then re-serialize, byte for byte
     img-drv canonical <dir>   canonicalizing must change nothing
     img-drv examples <dir>    emit the conformance corpus
+    img-drv transpile <dir>   emit the corpus as .nix expressions
     v}
 
     All exit non-zero on any failure, which is what makes them usable as CI
@@ -97,10 +98,37 @@ let emit_examples directory =
   Printf.printf "%d derivations written to %s\n" (List.length corpus) directory ;
   0
 
+(** Emit each conformance intent as a `.nix` EXPRESSION.
+
+    The other direction from `examples`: instead of building the IR and
+    serializing `.drv`, this builds Nix syntax for real Nix to instantiate. The
+    two must meet, which is what scripts/transpile-check.sh asserts. *)
+let emit_nix directory =
+  let rec mkdir_p d =
+    if not (Sys.file_exists d) then begin
+      mkdir_p (Filename.dirname d) ;
+      try Unix.mkdir d 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+    end
+  in
+  mkdir_p directory ;
+  let corpus = Img_drv_nix.Transpile_examples.corpus () in
+  List.iter
+    (fun (drv_name, e) ->
+      let base = Filename.remove_extension drv_name ^ ".nix" in
+      let oc = open_out_bin (Filename.concat directory base) in
+      output_string oc (Img_drv_nix.Surface.to_nix e) ;
+      output_string oc "\n" ;
+      close_out oc)
+    corpus ;
+  Printf.printf "%d expressions written to %s\n" (List.length corpus) directory ;
+  0
+
 let () =
   match Sys.argv with
   | [|_; command; directory|] ->
-      let needs_dir = not (String.equal command "examples") in
+      let needs_dir =
+        not (String.equal command "examples" || String.equal command "transpile")
+      in
       if
         needs_dir
         && not (Sys.file_exists directory && Sys.is_directory directory)
@@ -114,6 +142,7 @@ let () =
         | "roundtrip" -> roundtrip directory
         | "canonical" -> canonical_check directory
         | "examples" -> emit_examples directory
+        | "transpile" -> emit_nix directory
         | other ->
             Printf.eprintf "unknown command: %s\n" other ;
             exit 2
@@ -121,5 +150,6 @@ let () =
       exit code
   | _ ->
       prerr_endline
-        "usage: img-drv [verify|roundtrip|canonical|examples] <directory>" ;
+        "usage: img-drv [verify|roundtrip|canonical|examples|transpile] \
+         <directory>" ;
       exit 2

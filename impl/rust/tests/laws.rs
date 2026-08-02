@@ -263,7 +263,13 @@ proptest! {
     #[test]
     fn the_path_is_the_hash_of_the_bytes(i in intents()) {
         let drv = i.build();
-        prop_assert_eq!(drv.path(), &drv_path(&drv.aterm(), &i.name));
+        let refs: Vec<String> = drv
+            .derivation()
+            .input_drvs
+            .iter()
+            .map(|d| d.path.as_str().to_owned())
+            .collect();
+        prop_assert_eq!(drv.path(), &drv_path(&drv.aterm(), &i.name, &refs));
     }
 
     /// The two halves of the crate are inverse on the eDSL's image.

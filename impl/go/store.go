@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -180,6 +181,22 @@ func OutputPaths(d Derivation, drvName string, inputHashes map[StorePath]string)
 }
 
 // DrvPath is the path of the .drv file itself: a text store object.
-func DrvPath(aterm string, drvName string) StorePath {
-	return StorePathFor("text", SHA256Hex(aterm), drvName+".drv")
+//
+// references are the store paths the file MENTIONS: its inputDrvs and its
+// inputSrcs. They are part of the fingerprint, sorted and inserted after the
+// text kind:
+//
+//	text:<ref>:<ref>:...:sha256:<inner>:<store dir>:<name>
+//
+// Omitting them is right for a derivation with no inputs and wrong for
+// everything else. Verified against 1458 real nixpkgs .drv files, which are
+// named by real Nix: 1458 of 1458 with references, 149 of 1458 without.
+func DrvPath(aterm string, drvName string, references []string) StorePath {
+	refs := dedupe(references)
+	sort.Strings(refs)
+	kind := "text"
+	if len(refs) > 0 {
+		kind = "text:" + strings.Join(refs, ":")
+	}
+	return StorePathFor(kind, SHA256Hex(aterm), drvName+".drv")
 }

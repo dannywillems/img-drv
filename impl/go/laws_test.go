@@ -245,7 +245,11 @@ func TestCanonicalIsIdempotent(t *testing.T) {
 func TestThePathIsTheHashOfTheBytes(t *testing.T) {
 	check(t, func(i Intent) bool {
 		d := i.build()
-		return d.Path() == DrvPath(d.ATerm(), i.Name)
+		refs := []string{}
+		for _, e := range d.Derivation().InputDrvs {
+			refs = append(refs, string(e.Path))
+		}
+		return d.Path() == DrvPath(d.ATerm(), i.Name, refs)
 	})
 }
 

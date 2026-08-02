@@ -553,10 +553,15 @@ def derivation(
     )
 
     aterm = unparse(final)
+    # The .drv file MENTIONS its inputs, so they are references of the store
+    # object and belong in its fingerprint. See store.drv_path.
+    references = [str(i.path) for i in final.input_drvs] + [
+        str(s) for s in final.input_srcs
+    ]
     fixed = final.fixed_output
     return Drv(
         derivation=final,
-        path=drv_path(aterm, name),
+        path=drv_path(aterm, name, references),
         input_hash=(
             fixed_output_input_hash(fixed)
             if fixed is not None

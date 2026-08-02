@@ -13,6 +13,7 @@ hand-written examples could not.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 
 from .aterm import unparse
 from .derivation import (
@@ -200,6 +201,23 @@ def output_paths(
     }
 
 
-def drv_path(aterm: str, drv_name: str) -> StorePath:
-    """The path of the ``.drv`` file itself: a ``text`` store object."""
-    return store_path("text", sha256_hex(aterm), f"{drv_name}.drv")
+def drv_path(
+    aterm: str, drv_name: str, references: Iterable[str] = ()
+) -> StorePath:
+    """The path of the ``.drv`` file itself: a ``text`` store object.
+
+    ``references`` are the store paths the file MENTIONS: its ``inputDrvs``
+    and its ``inputSrcs``. They are part of the fingerprint, sorted and
+    inserted after the ``text`` kind:
+
+        text:<ref>:<ref>:...:sha256:<inner>:<store dir>:<name>
+
+    Omitting them gives the right answer for a derivation with no inputs and
+    the wrong one for everything else, which is how this was wrong here for a
+    long time: every gate compared our computation against a filename we had
+    also computed. Verified against 1458 real nixpkgs `.drv` files, which are
+    named by real Nix: 1458 of 1458 with references, 149 of 1458 without.
+    """
+    refs = sorted(set(references))
+    kind = "text:" + ":".join(refs) if refs else "text"
+    return store_path(kind, sha256_hex(aterm), f"{drv_name}.drv")

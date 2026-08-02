@@ -45,12 +45,12 @@ This is the quotient of `theory.md` section 4, made concrete.
 
 **Laws, and where they are tested.**
 
-| law | scope | test |
-| --- | --- | --- |
-| `parse . unparse = id` | every derivation | `test_aterm.py:79` |
-| `unparse . parse = id` | canonical text only | `test_golden.py:33`, and `make corpus` |
-| `canonical . canonical = canonical` | every derivation | `test_edsl_laws.py:270` |
-| `canonical = id` | every derivation real Nix emits | `test_edsl.py:388`, `make canonical-check` |
+| law                                 | scope                           | test                                       |
+| ----------------------------------- | ------------------------------- | ------------------------------------------ |
+| `parse . unparse = id`              | every derivation                | `test_aterm.py:79`                         |
+| `unparse . parse = id`              | canonical text only             | `test_golden.py:33`, and `make corpus`     |
+| `canonical . canonical = canonical` | every derivation                | `test_edsl_laws.py:270`                    |
+| `canonical = id`                    | every derivation real Nix emits | `test_edsl.py:388`, `make canonical-check` |
 
 **The one that matters.** The last row is what makes the form CANONICAL rather
 than merely ours. It holds on 2516 of 2516 real derivations, and `make corpus`
@@ -94,10 +94,10 @@ and it still gives everything the project needs.
 
 **Laws, and where they are tested.**
 
-| law | test |
-| --- | --- |
-| hashing is a function (same input, same answer) | `test_golden.py:51` |
-| recomputed output paths equal recorded ones | `test_golden.py:43`, `make corpus`, `make differential` |
+| law                                             | test                                                    |
+| ----------------------------------------------- | ------------------------------------------------------- |
+| hashing is a function (same input, same answer) | `test_golden.py:51`                                     |
+| recomputed output paths equal recorded ones     | `test_golden.py:43`, `make corpus`, `make differential` |
 
 ## 3. Output paths factor through masking, so there is no fixed point to solve
 
@@ -165,9 +165,9 @@ downstream. If they are, the parameter is an Option and the default is a lie.
 
 **Laws, and where they are tested.**
 
-| law | test |
-| --- | --- |
-| `None` and `Some ["out"]` differ in bytes and in path, for every intent | `test_edsl_laws.py:297` |
+| law                                                                             | test                                                  |
+| ------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `None` and `Some ["out"]` differ in bytes and in path, for every intent         | `test_edsl_laws.py:297`                               |
 | the `outputs` variable keeps DECLARATION order while the outputs list is sorted | `test_edsl.py:206`, and 575 of 1197 real cases differ |
 
 **Our framing.** The measurements are Nix's behaviour; the model-theoretic
@@ -192,14 +192,14 @@ implementation.
 **Laws, and where they are tested.** All are property-tested over generated
 intents with Hypothesis (`test_edsl_laws.py`), not over examples.
 
-| law | test |
-| --- | --- |
-| `env` insertion order is not observable | `test_edsl_laws.py:201` |
-| `input_drvs` order is not observable | `test_edsl_laws.py:218` |
-| naming one dependency twice is naming it once | `test_edsl_laws.py:234` |
+| law                                                   | test                    |
+| ----------------------------------------------------- | ----------------------- |
+| `env` insertion order is not observable               | `test_edsl_laws.py:201` |
+| `input_drvs` order is not observable                  | `test_edsl_laws.py:218` |
+| naming one dependency twice is naming it once         | `test_edsl_laws.py:234` |
 | describing the same intent twice gives the same bytes | `test_edsl_laws.py:186` |
-| `path == drv_path(aterm, name)` | `test_edsl_laws.py:277` |
-| a described closure verifies like a real one | `test_edsl_laws.py:345` |
+| `path == drv_path(aterm, name)`                       | `test_edsl_laws.py:277` |
+| a described closure verifies like a real one          | `test_edsl_laws.py:345` |
 
 The last one closes the loop between the two halves of the library: a generated
 DAG is described, written out, parsed back, and re-verified by the same code
@@ -375,11 +375,11 @@ it on the first run.
 
 Three ports, three traps, all in the same function:
 
-| language | trap | how it failed |
-| --- | --- | --- |
-| Rust | `u8 << 8` panics in debug, is MASKED to `<< 0` in release | release-only wrong answer |
-| Go | nil and empty slices behave alike, and the bytes depend on the difference | would have been silently wrong |
-| OCaml | custom operator precedence comes from the first character | wrong parse tree, no warning |
+| language | trap                                                                      | how it failed                  |
+| -------- | ------------------------------------------------------------------------- | ------------------------------ |
+| Rust     | `u8 << 8` panics in debug, is MASKED to `<< 0` in release                 | release-only wrong answer      |
+| Go       | nil and empty slices behave alike, and the bytes depend on the difference | would have been silently wrong |
+| OCaml    | custom operator precedence comes from the first character                 | wrong parse tree, no warning   |
 
 None of these is about the signature. All three are in the layer where a value
 is encoded rather than described, and each was caught by a gate that existed
@@ -412,12 +412,12 @@ it was not optional, because 1223 of 2516 real derivations use the encoding.
 **Why it is the cleanest measurement in the project.** One seven-case recursive
 sum, four languages, and the cost is starkly different:
 
-| language | encoding | cost |
-| --- | --- | --- |
-| OCaml | 7-case variant | 7 lines; every `match` checked exhaustive |
-| Rust | 7-variant `enum` | 7 lines; every `match` checked exhaustive |
-| Python | recursive `TypeAlias` | 1 alias; checked by mypy, erased at runtime |
-| Go | struct with a discriminant + 7 fields + 7 constructors | ~40 lines, and `JSONValue{}` is a REPRESENTABLE value of an invalid shape |
+| language | encoding                                               | cost                                                                      |
+| -------- | ------------------------------------------------------ | ------------------------------------------------------------------------- |
+| OCaml    | 7-case variant                                         | 7 lines; every `match` checked exhaustive                                 |
+| Rust     | 7-variant `enum`                                       | 7 lines; every `match` checked exhaustive                                 |
+| Python   | recursive `TypeAlias`                                  | 1 alias; checked by mypy, erased at runtime                               |
+| Go       | struct with a discriminant + 7 fields + 7 constructors | ~40 lines, and `JSONValue{}` is a REPRESENTABLE value of an invalid shape |
 
 Every earlier row of the typing table compared how an invariant is CHECKED.
 This one compares how a TYPE is spelled, and Go is the only language where the
@@ -443,3 +443,75 @@ one serialization.
 
 **Conformance:** 11 intents, 4 implementations, byte-identical to each other
 and to real Nix.
+
+## 10. A second non-standard model, and why only an EXTERNAL oracle found it
+
+**Structure:** satisfaction (`M |= T`) relative to two different theories: the
+one we wrote down and the one Nix actually implements.
+
+**The bug.** A `.drv` store path is a `text` store object, and a text store
+object's fingerprint lists the store paths the file REFERENCES. We omitted them.
+The corrected rule is in `docs/spec/store-paths.md`; the measurement against
+real nixpkgs filenames is 1458 of 1458 with references, **149 of 1458 without**,
+and the 149 are exactly the derivations with no inputs.
+
+**Why every gate missed it.** This is entry 4's phenomenon again and it is worth
+being precise about the shape rather than filing it as "we forgot a case".
+
+Write `f` for our path computation and `g` for Nix's. Four gates were already
+green:
+
+| gate                | what it actually asserts                               |
+| ------------------- | ------------------------------------------------------ |
+| `make corpus`       | `parse` then `unparse` is the identity; **`f` unused** |
+| `make spec-check`   | `f(d) = ` the filename we chose when we saved `d`      |
+| `make conformance`  | four implementations of `f` agree with each other      |
+| `make differential` | `f(d) = g(d)` for derivations we constructed           |
+
+Only the last one compares against Nix at all, and it compares on inputs we
+chose, all of which were small and most of which had no inputs of their own. The
+other three are consistency conditions on `f` alone. So the theory those gates
+pin down is not "`f = g`", it is "`f` is deterministic, total, and agrees with
+`g` on leaves". **Our implementation was a model of that theory.** It was just
+not the intended one.
+
+That is a NON-STANDARD MODEL in the exact sense `mathematical-abstraction.md`
+asks about: _what implementation satisfies every axiom I wrote down and is still
+wrong?_ Here the answer had been shipped for five commits.
+
+**What the commuting square adds.** The transpiler test is
+
+```
+        term  --print-->  .nix  --real Nix-->  .drv
+          |                                      |
+          | our evaluate                         | must be equal
+          v                                      v
+        .drv  ------------------------------->  .drv
+```
+
+and its content is that the right-hand path runs through `g` on an input we did
+NOT construct: Nix instantiates our source and NAMES the file itself. That is
+the first arrow in the project whose target is chosen by the oracle rather than
+by us. Model-theoretically it is the difference between checking `M |= T` for
+our own `T` and exhibiting an ELEMENTARY EMBEDDING into the standard model on a
+class of sentences we did not get to pick.
+
+**The rule this generalizes to.** A golden corpus you generated yourself is a
+fixed point of your own bug, not evidence. Two of the eleven goldens had to be
+RENAMED as part of this fix, which is the same fact stated concretely: the
+filenames were `f`-names wearing `g`-clothing, and nothing could tell until `g`
+was asked. Prefer an oracle that NAMES the artifact over one that merely
+VALIDATES an artifact you named.
+
+**Closing it permanently.** `make drvpath-check` recomputes every corpus
+filename from the file's own bytes. The corpus is 1458 files named by real Nix,
+so it was 1458 free vectors for `f = g` that sat unused for the whole life of
+the bug. It now runs inside `make corpus`, alongside the round-trip and
+output-path checks.
+
+**Honest scope.** This does not make `f = g` proved. It makes it sampled on
+1458 real points plus 11 constructed ones, which is the Rust-regime answer from
+`mathematical-abstraction.md` ("PBT is the only satisfaction check available"),
+not the Lean-regime one. The remaining gap is `inputSrcs`, where NAR
+serialization is still unimplemented, so no corpus derivation exercises a
+non-empty `inputSrcs` that we produced ourselves.

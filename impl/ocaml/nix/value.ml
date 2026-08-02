@@ -39,7 +39,8 @@ type value =
       (** name, arity, implementation. Applied one argument at a time, as Nix
           does, so a partially applied primop is itself a value. *)
 
-and attrs = (string * thunk) list  (** Sorted by name, as Nix keeps them. *)
+(** Sorted by name, as Nix keeps them. *)
+and attrs = (string * thunk) list
 
 and thunk = value Lazy.t
 
@@ -91,4 +92,5 @@ let type_of = function
 
 (** Force a thunk, turning OCaml's cycle detection into Nix's error message. *)
 let force (t : thunk) : value =
-  try Lazy.force t with Lazy.Undefined -> error "infinite recursion encountered"
+  try Lazy.force t
+  with Lazy.Undefined -> error "infinite recursion encountered"

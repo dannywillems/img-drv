@@ -156,12 +156,12 @@ def structured() -> Drv:
 
 #: Golden file name -> the intent that must reproduce it byte for byte.
 CORPUS: Mapping[str, Callable[[], Drv]] = {
-    "34h63y306vjiqi9974m0abrkp8aplgjq-dependent.drv": dependent,
+    "sb07z720914wba188q8vzq7jnx4596xp-dependent.drv": dependent,
     "3k9aahbip0dn0kb9m6i20sr2mjfmzsij-aaa.drv": aaa,
     "6hjg3xda34qvj2vpw27girg51gpdyd19-fixed.drv": fixed,
     "76w21n1f03fs5kw8fnffphx7qrqffw6r-hello.drv": hello,
     "7v25018h9x5nc7sc0sv57ghaq2qa0j9n-zzz.drv": zzz,
-    "h3ik45ycljylpdzjssckqi3vvslsbxpn-many.drv": many,
+    "5x04ng0y0kgnkp3kyah1ziwlyj107q8m-many.drv": many,
     "k1lc1y192xiajlyy4zvsdnfprnjx32i3-dep-a.drv": dep_a,
     "mfdcxzh0v906c5hngb3x0b7sjl130hpk-ordering.drv": ordering,
     "sqgix69fbs6hjh5kmf2pb1zvfmi5d0am-structured.drv": structured,

@@ -47,7 +47,8 @@ let rec coerce_to_string ?(list_ok = true) (v : value) : string * Context.t =
       ( String.concat " " (List.map fst parts),
         List.fold_left
           (fun acc (_, c) -> Context.union acc c)
-          Context.empty parts )
+          Context.empty
+          parts )
   | Attrs a -> (
       (* A derivation coerces to its outPath, and that is where the dependency
          edge comes from: the resulting string carries the drv path in its
@@ -94,7 +95,8 @@ let rec eval (env : env) (e : t) : value =
   | Let (binds, body) ->
       let a = eval_binds env true binds in
       eval {env with bindings = merge_bindings env.bindings a} body
-  | Has_attr (e, path) -> Bool (Option.is_some (select_opt env (eval env e) path))
+  | Has_attr (e, path) ->
+      Bool (Option.is_some (select_opt env (eval env e) path))
   | Select (e, path, dflt) -> (
       match (select_opt env (eval env e) path, dflt) with
       | Some t, _ -> force t
@@ -106,7 +108,8 @@ and truthy = function
   | v -> error "value is %s while a Boolean was expected" (type_name v)
 
 and merge_bindings outer inner =
-  attrs_of_list (inner @ List.filter (fun (k, _) -> not (List.mem_assoc k inner)) outer)
+  attrs_of_list
+    (inner @ List.filter (fun (k, _) -> not (List.mem_assoc k inner)) outer)
 
 and eval_parts env parts =
   List.fold_left
@@ -116,7 +119,8 @@ and eval_parts env parts =
       | Anti e ->
           let s, c = coerce_to_string (eval env e) in
           (acc ^ s, Context.union ctx c))
-    ("", Context.empty) parts
+    ("", Context.empty)
+    parts
 
 (* `rec { ... }` and `let` bind their own names, so a binding is evaluated in
    an environment that refers to the very set being built.
@@ -180,7 +184,12 @@ and bind_path env path e =
 
 and inherit_names env from names =
   match from with
-  | None -> List.map (fun a -> let n = attr_name env a in (n, lookup env n)) names
+  | None ->
+      List.map
+        (fun a ->
+          let n = attr_name env a in
+          (n, lookup env n))
+        names
   | Some src ->
       let s = lazy (eval env src) in
       List.map
@@ -227,7 +236,7 @@ and apply (f : value) (arg : thunk) : value =
           (fun (k, _) ->
             if not (List.exists (fun (n, _) -> String.equal n k) formals) then
               error "called with unexpected argument '%s'" k)
-          actual;
+          actual ;
       let rec bound =
         lazy
           (List.map
@@ -236,14 +245,18 @@ and apply (f : value) (arg : thunk) : value =
                | Some t, _ -> (name, t)
                | None, Some d ->
                    (name, lazy (eval {env with bindings = Lazy.force bound} d))
-               | None, None -> error "called without required argument '%s'" name)
+               | None, None ->
+                   error "called without required argument '%s'" name)
              formals
           @ (match alias with Some a -> [(a, arg)] | None -> [])
           @ env.bindings)
       in
       eval {env with bindings = Lazy.force bound} body
   | Primop (name, arity, impl) -> Primop_apply.partial name arity impl [arg]
-  | v -> error "attempt to call something which is not a function but %s" (type_name v)
+  | v ->
+      error
+        "attempt to call something which is not a function but %s"
+        (type_name v)
 
 and eval_op env o a b =
   let num_op fi ff =
@@ -274,7 +287,10 @@ and eval_op env o a b =
       | _ -> num_op ( + ) ( +. ))
   | Sub -> num_op ( - ) ( -. )
   | Mul -> num_op ( * ) ( *. )
-  | Div -> num_op (fun x y -> if y = 0 then error "division by zero" else x / y) ( /. )
+  | Div ->
+      num_op
+        (fun x y -> if y = 0 then error "division by zero" else x / y)
+        ( /. )
   | Eq -> Bool (equal (eval env a) (eval env b))
   | Neq -> Bool (not (equal (eval env a) (eval env b)))
   | Lt -> Bool (cmp () < 0)
@@ -288,14 +304,17 @@ and eval_op env o a b =
   | Update -> (
       match (eval env a, eval env b) with
       | Attrs x, Attrs y ->
-          Attrs (attrs_of_list (y @ List.filter (fun (k, _) -> not (List.mem_assoc k y)) x))
+          Attrs
+            (attrs_of_list
+               (y @ List.filter (fun (k, _) -> not (List.mem_assoc k y)) x))
       | x, _ -> error "value is %s while a set was expected" (type_name x))
 
 and equal x y =
   match (x, y) with
   | Value.Int a, Value.Int b -> a = b
   | Value.Float a, Value.Float b -> a = b
-  | Value.Int a, Value.Float b | Value.Float b, Value.Int a -> float_of_int a = b
+  | Value.Int a, Value.Float b | Value.Float b, Value.Int a ->
+      float_of_int a = b
   | Bool a, Bool b -> a = b
   | Str (a, _), Str (b, _) -> String.equal a b
   | Value.Path a, Value.Path b -> String.equal a b
@@ -307,5 +326,6 @@ and equal x y =
       List.length a = List.length b
       && List.for_all2
            (fun (k, p) (l, q) -> String.equal k l && equal (force p) (force q))
-           a b
+           a
+           b
   | _ -> false
