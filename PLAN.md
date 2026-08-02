@@ -74,6 +74,10 @@ Ordered. The top item is the next thing to do.
       than a printer bug; writing those eight down as a specification is what
       made the other three pass first time. See `docs/abstractions.md` entries
       13 and 14.
+- [x] **The two arrows compose.** `parse (emit e) = e`, up to three semantic
+      no-ops, checked over the whole parser corpus by `make nixpkgs-parse`.
+      This is what moved the corpus from the well-tested arrow to the
+      under-tested one; the transpiler had been checked on eleven intents.
 - [x] **The generated Go parser cannot go stale.** Go has no build step, so
       `impl/go/nix/grammar.go` is committed; `make check-parser` regenerates
       and diffs it in CI, because an un-regenerated `grammar.y` still compiles
@@ -511,6 +515,13 @@ Resolved, kept here only so the resolution is findable:
 ---
 
 ## Plan log
+
+- **2026-08-02** Composed the two arrows for the first time: `parse . emit`.
+  The retraction law went 197 of 300 to 1200 of 1200 and found three bugs the
+  eleven conformance intents could never reach, one of them semantic (a float
+  emitted as an integer changes what `/` means). It holds only up to three
+  quotients, and each one turned out to name a node we invented that Nix does
+  not keep. `docs/abstractions.md` entry 15.
 
 - **2026-08-02** The parser landed in Python (PLY), Rust (LALRPOP + logos) and
   Go (hand-written scanner + goyacc). All three passed the nixpkgs corpus on

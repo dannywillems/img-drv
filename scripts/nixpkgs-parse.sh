@@ -111,4 +111,25 @@ for impl in "$@"; do
   echo ">> $impl parses each and compares the printed tree"
   "$HERE/$(runner_for "$impl")" parsecheck "$REL" || fail=1
 done
+
+# The RETRACTION law, which costs nothing now that both arrows exist.
+#
+# `emit` and `parse` are the two arrows between EXPR and source text, and their
+# law is parse (emit e) = e, up to the three things `emit` provably forgets
+# (see impl/ocaml/nix/normalize.ml). That makes `emit . parse` idempotent: a
+# canonical-form projection on source, the same shape as the canonical .drv
+# form.
+#
+# It matters because it moves this corpus from the arrow that was already
+# well-tested to the one that was not: the transpiler had been checked on
+# ELEVEN hand-written intents while the parser was checked on thousands of real
+# files. It found two real bugs on its first run, one of them semantic.
+for impl in "$@"; do
+  case "$impl" in
+    ocaml)
+      echo ">> $impl re-parses what it emitted (the retraction law)"
+      "$HERE/$(runner_for "$impl")" reparse "$REL" || fail=1
+      ;;
+  esac
+done
 [ "$fail" -eq 0 ]

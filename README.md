@@ -3,7 +3,8 @@
 A portable, content-addressed **intermediate representation for reproducible
 build descriptions**, with thin embedded DSLs in **Go, OCaml, Rust and Python**.
 
-All four exist, and they emit the same bytes. See [Status](#status).
+All four exist, they emit the same bytes, and each can now also **write and
+read the Nix language itself**. See [Status](#status).
 
 ## The thesis
 
@@ -23,11 +24,11 @@ If it is false, this repository should say so, quickly and in public.
 Nix is really three separable systems, and only one of them is being
 questioned here:
 
-| Layer | What it does | Our position |
-| --- | --- | --- |
-| Evaluator | Nix language to derivations | **Replaceable.** This is the part we replace with eDSLs. |
-| Store and builder | Content-addressed store, sandbox, caches, GC | **Reuse.** Twenty years of work. Do not rewrite. |
-| Module system | Typed options, merging, activation | Interesting on its own, later. |
+| Layer             | What it does                                 | Our position                                             |
+| ----------------- | -------------------------------------------- | -------------------------------------------------------- |
+| Evaluator         | Nix language to derivations                  | **Replaceable.** This is the part we replace with eDSLs. |
+| Store and builder | Content-addressed store, sandbox, caches, GC | **Reuse.** Twenty years of work. Do not rewrite.         |
+| Module system     | Typed options, merging, activation           | Interesting on its own, later.                           |
 
 The evaluator is the layer people actually complain about (a hard functional
 language, documentation that never joins the language to the OS, flakes
@@ -90,7 +91,8 @@ docs/abstractions.md    which structure each piece of code realizes, its
 docs/nix-internals.md   how Nix actually works, with sources
 docs/learning-nix.md    a path to learning Nix properly, in order
 docs/spec/              the IR signature and canonical serialization,
-                        with golden .drv files from real Nix
+                        with golden .drv files from real Nix, plus the
+                        parser's differential vectors
 impl/python/            the reference implementation, as a library
 impl/rust/              the second implementation, as a crate
 impl/go/                the falsification test, as a module
@@ -99,14 +101,32 @@ impl/ocaml/             the typed reference, as an opam package
 
 ## Status
 
-**All four implementations exist, and they agree.** `make conformance` has the
-Python, Rust, Go and OCaml eDSLs describe the same ten intents and diffs the
-bytes every way: against each other, and each against derivations real Nix
-emitted. Currently **10 intents, 4 implementations, byte-identical to Nix**,
-including each derivation's own `.drv` store path. That is the Phase 2 exit
-test.
+**All four implementations exist, and they agree.** Every gate below runs in
+CI, and none of them is a test we wrote about ourselves: each compares against
+real Nix.
 
-Two results worth stating on their own.
+| gate                   | what it asserts                                       | current                       |
+| ---------------------- | ----------------------------------------------------- | ----------------------------- |
+| `make conformance`     | four eDSLs emit the same `.drv` bytes as Nix          | **11 intents x 4**            |
+| `make corpus`          | real nixpkgs closures round-trip and re-hash          | **2063 of 2063** output paths |
+| `make drvpath-check`   | each `.drv`'s own store path, from its bytes          | **1458 of 1458**              |
+| `make transpile-check` | our `.nix`, through real Nix, gives the golden `.drv` | **44 of 44**                  |
+| `make nixpkgs-parse`   | our parse tree equals `nix-instantiate --parse`       | **all four languages**        |
+| `make differential`    | a live closure's paths, against pinned Nix            | **7 of 7**                    |
+
+Both arrows between the Nix language and its syntax tree now exist, in all four
+languages. The arrow from that tree to the IR does NOT: there is no
+`derivation` primop yet, so a real package can be read and written but not yet
+turned into a derivation.
+
+```
+   .nix text  --parse-->  EXPR  - - eval - >  DRV  --hash-->  store path
+              <--emit---              ^
+                                      |
+                                 not built yet
+```
+
+Four results worth stating on their own.
 
 **The falsification test came back negative.** Go was the one most likely to
 refute the thesis, and the signature needed nothing beyond finite products
@@ -120,9 +140,21 @@ what you COMPUTE. OCaml moves exactly one row the others cannot
 ([`impl/ocaml/README.md`](impl/ocaml/README.md)), and the last two rows move
 nowhere.
 
-Next is `__structuredAttrs`, the second env encoding that 1223 of 2516 real
-derivations use, without which the eDSL cannot express a modern nixpkgs
-package. See [`PLAN.md`](PLAN.md).
+**Agreement between implementations is not evidence of correctness.** A store
+path rule was wrong in all four at once, byte-identically, and every gate that
+compared them against each other stayed green. It was found by the first check
+that let NIX name the artifact instead of validating one we had named. The
+language count measures PORTABILITY; only an external oracle measures
+CORRECTNESS. `docs/abstractions.md` entry 10.
+
+**A curated test set measures what you thought to ask.** The Nix parser passed
+59 hand-written differential vectors and then scored **0 of 40** on real
+nixpkgs files. Eight rules of Nix were wrong or missing, none of them exotic.
+Writing those eight down as a specification is what made the other three ports
+pass first time. Entries 13 and 14.
+
+Next is the EVALUATOR: parsing is done, but without a `derivation` primop no
+parsed package can become IR. See [`PLAN.md`](PLAN.md).
 
 ## Licence
 

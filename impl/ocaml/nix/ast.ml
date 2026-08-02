@@ -139,5 +139,9 @@ let resolve_path (p : string) : string =
     Canonicalising removes it, so it is put back. *)
 let resolve_path_prefix (p : string) : string =
   let resolved = resolve_path p in
-  if String.length p > 0 && p.[String.length p - 1] = '/' then resolved ^ "/"
+  if
+    String.length p > 0
+    && p.[String.length p - 1] = '/'
+    && not (String.equal resolved "/")
+  then resolved ^ "/"
   else resolved

@@ -763,3 +763,66 @@ That last clause is the whole reason this is not circular, and it is the same
 point as entry 10: four agreeing implementations measure whether a spec was
 transcribed consistently, and only an external oracle measures whether the spec
 is right.
+
+## 15. The retraction law, and three nodes we invented
+
+**Structure:** a RETRACTION. `emit` is a section, `parse` is a retraction, and
+EXPR is a retract of source text. Not an isomorphism.
+
+`emit : EXPR -> Text` and `parse : Text -> EXPR` had both existed for a while
+and had never been composed. Their law is
+
+```
+parse (emit e) = e
+```
+
+which makes `emit . parse` IDEMPOTENT:
+
+```
+(emit . parse) . (emit . parse) = emit . (parse . emit) . parse = emit . parse
+```
+
+so it is a canonical-form projection on source text, structurally the same
+object as entry 1's canonical `.drv` form, one layer up. The other direction
+fails on purpose: `emit (parse t)` loses comments and formatting, so `parse` is
+not injective and there is no isomorphism to be had.
+
+**Why it was worth doing first.** The transpiler had been verified on ELEVEN
+hand-written intents. The parser had been verified on thousands of real files.
+Composing them transfers the parser's corpus to the transpiler at no cost, and
+it went **197 of 300 to 1200 of 1200**.
+
+**Three real bugs, and what they have in common.**
+
+| bug                                            | consequence                                                                                                                   |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| a float printed as `1`                         | re-parses as an INTEGER, and `1 / 2` is 0 for integers and 0.5 for floats, so the transpiler could silently change arithmetic |
+| the root path printed as `/`                   | lexes as the DIVISION operator; the emitted source did not parse at all                                                       |
+| a string-named attribute printed as `${"..."}` | denotes the same attribute and re-parses as a DYNAMIC name, which Nix keeps distinct                                          |
+
+All three are invisible to the differential printer, because `--parse`
+collapses exactly the distinctions that broke. And none is reachable from the
+eleven conformance intents, none of which contains a float, a root path, or a
+computed attribute name. The law reached them on the first run.
+
+**The law holds only up to three quotients, and that is the finding.** Each one
+names a node WE invented that Nix does not keep:
+
+| quotient         | why Nix does not keep it                                              |
+| ---------------- | --------------------------------------------------------------------- |
+| literal CHUNKING | the lexer splits on which ESCAPES were used; evaluation cannot see it |
+| `Ind_str`        | an indented string is an `ExprString` once dedenting has run          |
+| `Uri`            | `x:x` parses to a plain string                                        |
+
+`impl/ocaml/nix/normalize.ml` is that quotient, written out. Normalising by it
+is the honest statement of the law rather than a way to make a failing test
+pass, and the fact that all three are our own inventions is the result: our AST
+is FINER than Nix's, and the extra structure carries nothing recoverable.
+
+**A corollary worth keeping.** The `--parse` debug form is therefore STRICTLY
+FINER than semantic equality: it distinguishes `("a" + "$" + "b")` from
+`"a$b"`, which Nix evaluates identically. That is exactly what makes it a good
+oracle for a PARSER, since it pins more than behaviour does, and exactly why a
+round-trip law over a TRANSPILER has to be stated in the quotient. Two arrows,
+two different notions of equality, and getting them the same way round is the
+whole content of this entry.

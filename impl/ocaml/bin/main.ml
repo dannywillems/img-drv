@@ -209,6 +209,95 @@ let parse_check directory =
     (!ok + !bad) ;
   if !bad = 0 then 0 else 1
 
+(** The RETRACTION law: parsing what we printed gives back the same tree.
+
+    [emit] and [parse] are the two arrows between EXPR and source text, and
+    until now they were never composed. Their law is
+
+      parse (emit e) = e
+
+    which makes [emit] a SECTION, [parse] a RETRACTION, and EXPR a RETRACT of
+    text. Not an isomorphism: [emit (parse t)] loses comments and formatting,
+    so [parse] is not injective. What DOES follow is that [emit . parse] is
+    IDEMPOTENT, since
+
+      (emit . parse) . (emit . parse) = emit . (parse . emit) . parse
+                                      = emit . parse
+
+    so it is a canonical-form projection on source text, structurally the same
+    object as the canonical `.drv` form in [docs/abstractions.md] entry 1.
+
+    That idempotence is what this checks, and it is why the check is nearly
+    free: every file in the parser's corpus is a term to test [emit] on. The
+    transpiler had been verified on ELEVEN hand-written intents while the
+    parser was verified on thousands of real files, so composing them moves the
+    corpus from the well-tested arrow to the under-tested one. *)
+let reparse directory =
+  let files =
+    Sys.readdir directory |> Array.to_list
+    |> List.filter (fun f -> Filename.check_suffix f ".nix")
+    |> List.sort compare
+  in
+  let home =
+    let p = Filename.concat directory "home" in
+    if Sys.file_exists p then String.trim (read_file p) else ""
+  in
+  let origin base =
+    let p = Filename.concat directory (base ^ ".path") in
+    if Sys.file_exists p then String.trim (read_file p) else base
+  in
+  let ok = ref 0 and bad = ref 0 in
+  List.iter
+    (fun f ->
+      let base = Filename.remove_extension f in
+      let src = read_file (Filename.concat directory f) in
+      let dir = Filename.dirname (origin base) in
+      match Img_drv_nix.Nix.parse_string ~base:dir ~home src with
+      | Error _ -> ()
+      | Ok tree -> (
+          let printed = Img_drv_nix.Emit.to_string tree in
+          match Img_drv_nix.Nix.parse_string ~base:dir ~home printed with
+          | Error msg ->
+              incr bad ;
+              if !bad <= 5 then
+                Printf.printf
+                  "EMITTED SOURCE DOES NOT PARSE %s: %s\n"
+                  (origin base)
+                  msg
+          | Ok again ->
+              let norm = Img_drv_nix.Normalize.expr in
+              if norm again = norm tree then incr ok
+              else begin
+                incr bad ;
+                if !bad <= 5 then begin
+                  let a = Img_drv_nix.Printer.to_string (norm tree) in
+                  let b = Img_drv_nix.Printer.to_string (norm again) in
+                  let n = min (String.length a) (String.length b) in
+                  let rec first i =
+                    if i >= n then n
+                    else if a.[i] = b.[i] then first (i + 1)
+                    else i
+                  in
+                  let d = first 0 in
+                  let window s =
+                    let from = max 0 (d - 30) in
+                    String.sub s from (min 90 (String.length s - from))
+                  in
+                  Printf.printf
+                    "ROUND TRIP DIFFERS %s (at offset %d)\n"
+                    (origin base)
+                    d ;
+                  Printf.printf "  before ...%s...\n" (window a) ;
+                  Printf.printf "  after  ...%s...\n" (window b)
+                end
+              end))
+    files ;
+  Printf.printf
+    "%d/%d real expressions survive emit then parse unchanged\n"
+    !ok
+    (!ok + !bad) ;
+  if !bad = 0 then 0 else 1
+
 let () =
   match Sys.argv with
   | [|_; command; directory|] ->
@@ -230,6 +319,7 @@ let () =
         | "examples" -> emit_examples directory
         | "transpile" -> emit_nix directory
         | "parsecheck" -> parse_check directory
+        | "reparse" -> reparse directory
         | other ->
             Printf.eprintf "unknown command: %s\n" other ;
             exit 2
@@ -238,6 +328,6 @@ let () =
   | _ ->
       prerr_endline
         "usage: img-drv \
-         [verify|roundtrip|canonical|examples|transpile|parsecheck] \
+         [verify|roundtrip|canonical|examples|transpile|parsecheck|reparse] \
          <directory>" ;
       exit 2

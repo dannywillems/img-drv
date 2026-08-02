@@ -476,6 +476,67 @@ let law_described_closure_verifies () =
 (* the Nix parser, against vectors produced by real Nix                *)
 (* ------------------------------------------------------------------ *)
 
+(* The RETRACTION law: parsing what we printed gives back the same tree.
+
+   [emit] and [parse] are the two arrows between EXPR and source text, and
+   their law is [parse (emit e) = e], up to the three semantic no-ops named in
+   {!Img_drv_nix.Normalize}. That makes [emit] a section, [parse] a retraction,
+   and [emit . parse] an IDEMPOTENT canonical-form projection on source text.
+
+   Checked at scale by [make nixpkgs-parse], which runs it over every file in
+   the parser corpus. The cases below are the three bugs it found on its first
+   run, kept as regressions because each is invisible to the differential
+   printer: the printer collapses exactly the distinctions that broke. *)
+let round_trips ?(base = "") ?(home = "") src =
+  match Img_drv_nix.Nix.parse_string ~base ~home src with
+  | Error e -> Alcotest.failf "%s: %s" src e
+  | Ok tree -> (
+      let printed = Img_drv_nix.Emit.to_string tree in
+      match Img_drv_nix.Nix.parse_string ~base ~home printed with
+      | Error e -> Alcotest.failf "emitted %s does not parse: %s" printed e
+      | Ok again ->
+          let norm = Img_drv_nix.Normalize.expr in
+          Alcotest.(check bool)
+            (Printf.sprintf "%s round-trips (emitted %s)" src printed)
+            true
+            (norm again = norm tree))
+
+let test_retraction_law () =
+  List.iter
+    (fun src -> round_trips src)
+    [
+      "1";
+      "{ a = 1; b = \"x\"; }";
+      "(x: (y: (x y)))";
+      "rec { a = 1; b = a; }";
+      "let x = 1; in { inherit x; }";
+      "[ 1 2 3 ]";
+      "(a: a ? b.c)";
+      "(with { a = 1; }; a)";
+      "if true then 1 else 2";
+      "''an indented string''";
+      "\"a$b\"";
+      "x:x";
+    ]
+
+(* The root path cannot be written as a bare separator: that lexes as the
+   division operator. Nix source spells it `/.`, and nixpkgs really does write
+   the root path followed by a concatenation. *)
+let test_root_path_survives () = round_trips ~base:"/w" "/. + \"/x\""
+
+(* A float that prints as an integer must still LEX as a float, because Nix
+   distinguishes them: `1 / 2` is 0 for integers and 0.5 for floats, so getting
+   this wrong changes arithmetic silently. *)
+let test_float_stays_a_float () =
+  round_trips "1.0" ;
+  round_trips "{ a = 1.0; b = 2.5; }"
+
+(* A string-named attribute is not a dynamic one. Emitting it wrapped in an
+   interpolation denotes the same attribute and re-parses as a DIFFERENT
+   node. *)
+let test_string_attr_stays () =
+  round_trips "let x = \"y\"; in { \"a${x}b\" = 1; }"
+
 let vectors_path =
   match Sys.getenv_opt "IMG_DRV_NIX_VECTORS" with
   | Some p -> p
@@ -547,7 +608,13 @@ let () =
             test_a_digest_means_the_same_however_written;
         ] );
       ( "nix parser",
-        [case "matches nix-instantiate --parse" test_parser_matches_nix] );
+        [
+          case "matches nix-instantiate --parse" test_parser_matches_nix;
+          case "emit then parse is the identity" test_retraction_law;
+          case "the root path survives emit" test_root_path_survives;
+          case "a float stays a float" test_float_stays_a_float;
+          case "a string-named attribute stays one" test_string_attr_stays;
+        ] );
       ( "laws",
         [
           case "same intent twice, same bytes" law_same_intent_twice;

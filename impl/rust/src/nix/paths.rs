@@ -66,7 +66,7 @@ pub fn resolve_path(path: &str) -> String {
 /// dropping the separator would glue the two segments together.
 pub fn resolve_path_prefix(path: &str) -> String {
     let resolved = resolve_path(path);
-    if path.ends_with('/') {
+    if path.ends_with('/') && resolved != "/" {
         format!("{resolved}/")
     } else {
         resolved

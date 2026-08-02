@@ -63,7 +63,7 @@ func ResolvePath(p string) string {
 // the separator would glue the two segments together.
 func ResolvePathPrefix(p string) string {
 	resolved := ResolvePath(p)
-	if strings.HasSuffix(p, "/") {
+	if strings.HasSuffix(p, "/") && resolved != "/" {
 		return resolved + "/"
 	}
 	return resolved

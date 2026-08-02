@@ -386,4 +386,6 @@ def resolve_path_prefix(p: str) -> str:
     ``v``, and dropping the separator would glue the segments together.
     """
     resolved = resolve_path(p)
-    return resolved + "/" if p.endswith("/") else resolved
+    if p.endswith("/") and resolved != "/":
+        return resolved + "/"
+    return resolved

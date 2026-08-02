@@ -20,6 +20,38 @@ import (
 // Making the output pretty is a separate, later job with its own test: emit,
 // re-parse, compare the ASTs.
 
+// pathLiteral writes a path so it lexes back as a PATH.
+//
+// The ROOT path cannot be written as a bare separator: that lexes as the
+// division operator. Nix source spells it `/.`, which is what nixpkgs itself
+// writes, and what `lib/path/tests/prop.nix` writes in `/. + ("/" + str)`.
+// The differential printer prints it as `/` because Nix does; the two printers
+// disagree on purpose, and only the round-trip law could see it.
+func pathLiteral(p string) string {
+	if p == "/" {
+		return "/."
+	}
+	return p
+}
+
+// floatLiteral writes a float so it lexes back as a FLOAT.
+//
+// The default formatting prints 1.0 as `1`, which re-parses as an INTEGER, and
+// Nix distinguishes the two: `1 / 2` is 0 for integers and 0.5 for floats. So
+// the transpiler was silently able to change arithmetic. Found by the
+// round-trip law, not by the eleven conformance intents, none of which contains
+// a float.
+//
+// The differential printer must NOT do this either: nix-instantiate --parse
+// really does print 1.0 as `1`, and that is pinned by a vector.
+func floatLiteral(f float64) string {
+	text := strconv.FormatFloat(f, 'g', -1, 64)
+	if strings.ContainsAny(text, ".eEn") {
+		return text
+	}
+	return text + ".0"
+}
+
 // escaper rewrites the characters that cannot appear raw in a Nix string.
 //
 // The $ is the one that matters and the one that is easy to miss: Nix reads
@@ -61,6 +93,11 @@ func writeAttr(b *strings.Builder, a Attr) {
 		b.WriteString("${")
 		writeExpr(b, a.Expr)
 		b.WriteString("}")
+	// A string-named attribute is emitted as a STRING, not wrapped in an
+	// interpolation. Writing ${"a${x}b"} is valid Nix denoting the same
+	// attribute, but it re-parses as a DYNAMIC name rather than a string one,
+	// and Nix keeps those apart. The differential printer collapses them, so
+	// nothing but the round-trip law could see it.
 	case StrAttr:
 		if len(a.Parts) == 1 {
 			if lit, ok := a.Parts[0].(Lit); ok {
@@ -68,9 +105,7 @@ func writeAttr(b *strings.Builder, a Attr) {
 				return
 			}
 		}
-		b.WriteString("${")
 		writeParts(b, a.Parts)
-		b.WriteString("}")
 	default:
 		panic(fmt.Sprintf("unknown attribute %T", a))
 	}
@@ -151,11 +186,11 @@ func writeExpr(b *strings.Builder, e Expr) {
 	case Int:
 		b.WriteString(strconv.FormatInt(e.Value, 10))
 	case Float:
-		b.WriteString(strconv.FormatFloat(e.Value, 'g', -1, 64))
+		b.WriteString(floatLiteral(e.Value))
 	case Var:
 		b.WriteString(e.Name)
 	case PathLit:
-		b.WriteString(e.Text)
+		b.WriteString(pathLiteral(e.Text))
 	case SearchPath:
 		b.WriteString("<" + e.Text + ">")
 	case URI:

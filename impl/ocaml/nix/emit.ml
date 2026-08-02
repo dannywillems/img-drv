@@ -38,6 +38,30 @@ let escape s =
     s ;
   Buffer.contents b
 
+(* A float has to be written so it lexes back as a FLOAT.
+
+   `%g` prints 1.0 as `1`, which re-parses as an INTEGER, and Nix distinguishes
+   the two: `1 / 2` is 0 for integers and 0.5 for floats. So the transpiler was
+   silently able to change arithmetic. Found by the round-trip law, not by the
+   eleven conformance intents, none of which contains a float.
+
+   Note that the DIFFERENTIAL printer must NOT do this: `nix-instantiate
+   --parse` really does print 1.0 as `1`, and that is pinned by a vector. The
+   two printers disagree on purpose. *)
+(* The ROOT path cannot be written as a bare separator: that lexes as the
+   division operator. Nix source spells it `/.`, which is what nixpkgs itself
+   writes, and what `lib/path/tests/prop.nix` writes in `/. + ("/" + str)`.
+   The differential printer prints it as `/` because Nix does; the two printers
+   disagree on purpose, and only the round-trip law could see it. *)
+let path_literal p = if String.equal p "/" then "/." else p
+
+let float_literal f =
+  let text = Printf.sprintf "%g" f in
+  let lexes_as_float =
+    String.exists (fun c -> c = '.' || c = 'e' || c = 'E' || c = 'n') text
+  in
+  if lexes_as_float then text else text ^ ".0"
+
 let op_text = function
   | Add -> "+"
   | Sub -> "-"
@@ -58,9 +82,9 @@ let op_text = function
 let rec pp b (e : t) =
   match e with
   | Int n -> buf_add b (string_of_int n)
-  | Float f -> buf_add b (Printf.sprintf "%g" f)
+  | Float f -> buf_add b (float_literal f)
   | Var x -> buf_add b x
-  | Path p -> buf_add b p
+  | Path p -> buf_add b (path_literal p)
   | Search_path p -> buf_add b ("<" ^ p ^ ">")
   | Uri u -> buf_add b ("\"" ^ escape u ^ "\"")
   | Path_interp parts ->
@@ -179,11 +203,13 @@ and pp_attr b = function
       buf_add b "${" ;
       pp b e ;
       buf_add b "}"
+  (* A string-named attribute is emitted as a STRING, not wrapped in an
+     interpolation. Writing `${"a${x}b"}` is valid Nix denoting the same
+     attribute, but it re-parses as a DYNAMIC name rather than a string one,
+     and Nix keeps those apart. The differential printer collapses them, so
+     nothing but the round-trip law could see it. *)
   | Astr [Lit s] -> buf_add b ("\"" ^ escape s ^ "\"")
-  | Astr parts ->
-      buf_add b "${" ;
-      pp_string b parts ;
-      buf_add b "}"
+  | Astr parts -> pp_string b parts
 
 and pp_attrpath b path =
   List.iteri

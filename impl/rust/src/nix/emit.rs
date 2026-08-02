@@ -16,6 +16,37 @@ use std::fmt::Write as _;
 
 use super::ast::{Attr, AttrPath, Binding, Expr, Part, Pattern};
 
+/// Write a path so it lexes back as a PATH.
+///
+/// The ROOT path cannot be written as a bare separator: that lexes as the
+/// DIVISION OPERATOR, so the emitted source does not parse at all. Nix source
+/// spells it `/.`, which is what nixpkgs itself writes.
+///
+/// The differential printer prints it as `/`, because Nix does. The two
+/// printers disagree on purpose, and only the round-trip law could see it.
+fn path_literal(p: &str) -> &str {
+    if p == "/" { "/." } else { p }
+}
+
+/// Write a float so it lexes back as a FLOAT.
+///
+/// The default formatting prints `1.0` as `1`, which re-parses as an INTEGER,
+/// and Nix distinguishes the two: `1 / 2` is 0 for integers and 0.5 for floats.
+/// So the transpiler was silently able to change arithmetic. Found by the
+/// round-trip law, not by the eleven conformance intents, none of which
+/// contains a float.
+///
+/// The differential printer must NOT do this either: `nix-instantiate --parse`
+/// really does print `1.0` as `1`, and that is pinned by a vector.
+fn float_literal(f: f64) -> String {
+    let text = format!("{f}");
+    if text.contains(['.', 'e', 'E', 'n']) {
+        text
+    } else {
+        format!("{text}.0")
+    }
+}
+
 /// Escape a string's contents for a double-quoted Nix literal.
 fn escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -57,15 +88,16 @@ fn attr(out: &mut String, a: &Attr) {
             expr(out, e);
             out.push('}');
         }
+        // A string-named attribute is emitted as a STRING, not wrapped in an
+        // interpolation. Writing `${"a${x}b"}` is valid Nix denoting the same
+        // attribute, but it re-parses as a DYNAMIC name rather than a string
+        // one, and Nix keeps those apart. The differential printer collapses
+        // them, so nothing but the round-trip law could see it.
         Attr::Str(ps) => match ps.as_slice() {
             [Part::Lit(s)] => {
                 let _ = write!(out, "\"{}\"", escape(s));
             }
-            _ => {
-                out.push_str("${");
-                parts(out, ps);
-                out.push('}');
-            }
+            _ => parts(out, ps),
         },
     }
 }
@@ -138,11 +170,9 @@ fn expr(out: &mut String, e: &Expr) {
         Expr::Int(n) => {
             let _ = write!(out, "{n}");
         }
-        Expr::Float(f) => {
-            let _ = write!(out, "{f}");
-        }
+        Expr::Float(f) => out.push_str(&float_literal(*f)),
         Expr::Var(x) => out.push_str(x),
-        Expr::Path(p) => out.push_str(p),
+        Expr::Path(p) => out.push_str(path_literal(p)),
         Expr::SearchPath(p) => {
             let _ = write!(out, "<{p}>");
         }

@@ -30,6 +30,38 @@ _ESCAPES = {
 }
 
 
+def _path_literal(p: str) -> str:
+    """Write a path so it lexes back as a PATH.
+
+    The ROOT path cannot be written as a bare separator: that lexes as the
+    DIVISION OPERATOR, so the emitted source does not parse at all. Nix source
+    spells it ``/.``, which is what nixpkgs itself writes.
+
+    The differential printer prints it as ``/``, because Nix does. The two
+    printers disagree on purpose, and only the round-trip law could see it.
+    """
+    return "/." if p == "/" else p
+
+
+def _float_literal(f: float) -> str:
+    """Write a float so it lexes back as a FLOAT.
+
+    ``%g`` prints ``1.0`` as ``1``, which re-parses as an INTEGER, and Nix
+    distinguishes the two: ``1 / 2`` is 0 for integers and 0.5 for floats. So
+    the transpiler was silently able to change arithmetic. Found by the
+    round-trip law, not by the eleven conformance intents, none of which
+    contains a float.
+
+    The differential printer must NOT do this either: ``nix-instantiate
+    --parse`` really does print ``1.0`` as ``1``, and that is pinned by a
+    vector.
+    """
+    text = f"{f:g}"
+    if any(c in text for c in ".eEn"):
+        return text
+    return text + ".0"
+
+
 def _escape(text: str) -> str:
     return "".join(_ESCAPES.get(c, c) for c in text)
 
@@ -45,13 +77,21 @@ def _parts(parts: tuple[ast.Part, ...]) -> str:
 
 
 def _attr(a: ast.Attr) -> str:
+    """Render one attribute-path component.
+
+    A string-named attribute is emitted as a STRING, not wrapped in an
+    interpolation. Writing ``${"a${x}b"}`` is valid Nix denoting the same
+    attribute, but it re-parses as a DYNAMIC name rather than a string one, and
+    Nix keeps those apart. The differential printer collapses them, so nothing
+    but the round-trip law could see it.
+    """
     if isinstance(a, ast.Id):
         return a.name
     if isinstance(a, ast.DynAttr):
         return "${" + _expr(a.expr) + "}"
     if len(a.parts) == 1 and isinstance(a.parts[0], ast.Lit):
         return '"' + _escape(a.parts[0].text) + '"'
-    return "${" + _parts(a.parts) + "}"
+    return _parts(a.parts)
 
 
 def _attrpath(path: ast.AttrPath) -> str:
@@ -84,11 +124,11 @@ def _expr(e: ast.Expr) -> str:
         case ast.Int():
             return str(e.value)
         case ast.Float():
-            return f"{e.value:g}"
+            return _float_literal(e.value)
         case ast.Var():
             return e.name
         case ast.Path():
-            return e.text
+            return _path_literal(e.text)
         case ast.SearchPath():
             return f"<{e.text}>"
         case ast.Uri():
