@@ -5,6 +5,7 @@
 //! img-drv roundtrip <dir>   parse then re-serialize, byte for byte
 //! img-drv canonical <dir>   canonicalizing must change nothing
 //! img-drv examples <dir>    emit the conformance corpus
+//! img-drv transpile <dir>   emit the same corpus as .nix source
 //! ```
 //!
 //! All exit non-zero on any failure, which is what makes them usable as CI
@@ -14,16 +15,17 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use img_drv::nix::{to_nix, transpile_examples};
 use img_drv::{Corpus, canonical, examples::corpus, parse, unparse};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let [command, directory] = args.as_slice() else {
-        eprintln!("usage: img-drv [verify|roundtrip|canonical|examples] <directory>");
+        eprintln!("usage: img-drv [verify|roundtrip|canonical|examples|transpile] <directory>");
         return ExitCode::from(2);
     };
     let directory = PathBuf::from(directory);
-    if command != "examples" && !directory.is_dir() {
+    if !matches!(command.as_str(), "examples" | "transpile") && !directory.is_dir() {
         eprintln!("not a directory: {}", directory.display());
         return ExitCode::from(2);
     }
@@ -32,6 +34,7 @@ fn main() -> ExitCode {
         "roundtrip" => roundtrip(&directory),
         "canonical" => canonical_check(&directory),
         "examples" => emit_examples(&directory),
+        "transpile" => transpile(&directory),
         other => {
             eprintln!("unknown command: {other}");
             return ExitCode::from(2);
@@ -135,4 +138,24 @@ fn file_name(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default()
+}
+
+/// Write each intent as a `.nix` expression, for real Nix to instantiate.
+///
+/// The other half of the commuting square: `examples` emits the IR directly,
+/// this emits source that must produce the SAME bytes when Nix evaluates it.
+/// Names match the goldens so `scripts/transpile-check.sh` can pair them up.
+fn transpile(directory: &Path) -> Outcome {
+    std::fs::create_dir_all(directory)?;
+    let written = transpile_examples::corpus();
+    for (name, expr) in &written {
+        let target = directory.join(format!("{}.nix", name.trim_end_matches(".drv")));
+        std::fs::write(target, format!("{}\n", to_nix(expr)))?;
+    }
+    println!(
+        "{} expressions written to {}",
+        written.len(),
+        directory.display()
+    );
+    Ok(0)
 }
