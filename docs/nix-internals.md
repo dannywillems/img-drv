@@ -15,6 +15,48 @@ checked before code depends on it.
 
 `img-drv` replaces (1), reuses (2), and defers (3).
 
+## Expressions, derivations, outputs: three stages, not two
+
+The single most common confusion, and the one that decides what this project
+can and cannot read. These are three different things with three different
+representations:
+
+| stage | what it is | representation |
+| --- | --- | --- |
+| **expression** | source in the Nix LANGUAGE | `default.nix`, `flake.nix`: text in a lazy functional language |
+| **derivation** | a build recipe, first-order DATA | `/nix/store/<hash>-name.drv`, an ATerm |
+| **output** | the built files | `/nix/store/<hash>-name/`, a directory |
+
+and two transitions between them:
+
+```
+expression --[ evaluate ]--> derivation --[ realise ]--> output
+              nix-instantiate              nix-store --realise
+```
+
+So yes: **an expression produces a derivation**, by evaluation. It is not a
+different notation for one. `pkgs/.../cnijfilter_2_80/default.nix` is 140 lines
+of Nix calling `stdenv.mkDerivation`; evaluating it yields ONE `.drv` whose
+closure is 1458 derivations, because `stdenv`, its inputs, and their inputs are
+all expressions that evaluate to derivations too.
+
+The evaluation is where nearly all of Nix's complexity lives: laziness, the
+module system's fixed point, `import`, string contexts, and the whole of
+nixpkgs' `lib`. The derivation, by contrast, is inert first-order data with a
+documented on-disk format, which is exactly why `img-drv` targets it.
+
+**What that means for this project.** The four implementations here read and
+write DERIVATIONS. None of them can parse an expression, and that is a design
+choice rather than an omission: the eDSLs replace the evaluator, so a build is
+described in Python, Rust, Go or OCaml and emitted straight as a `.drv`. The
+gap is visible and measurable: `cnijfilter_2_80`'s expression cannot be parsed
+by anything here, while its instantiated closure verifies completely (1458 of
+1458 round-tripped byte-identically, 2063 of 2063 output paths reproduced, in
+all four languages).
+
+Closing that gap means writing an evaluator, which is `PLAN.md` phase 4 and is
+deliberately the largest remaining item.
+
 ## Derivations: the IR
 
 A **store derivation** is the reified build description. It is stored on disk in
