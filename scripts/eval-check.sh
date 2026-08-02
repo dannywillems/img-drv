@@ -52,8 +52,13 @@ runner_for() {
 # tests the context homomorphism on the Built case. probe-src.nix interpolates
 # a PATH LITERAL, which the evaluator has to copy into the store through NAR
 # before it can even name it, so it tests the Opaque case and joins this gate to
-# nar-check.
-PROBES="${PROBE:-probe.nix probe-src.nix}"
+# nar-check. probe-builtins.nix drives every builtin through a derivation
+# ATTRIBUTE, so the question asked of each is not "is the value right" but
+# "does the store path move", which is stronger and leaves a wrong answer
+# nowhere to hide. probe-structured.nix uses the SECOND env encoding
+# (__structuredAttrs, 1223 of 2516 real derivations) plus `import`, and it is
+# the one that catches an implementation that coerces every value to a string.
+PROBES="${PROBE:-probe.nix probe-src.nix probe-builtins.nix probe-structured.nix}"
 
 run_probe() {
   local PROBE="$1"
@@ -66,7 +71,7 @@ echo ">> asking the pinned nix to instantiate $PROBE"
 # --add-root would need a writable store root; instead copy the closure out.
 docker run --rm -v "$HERE:/s:ro" -v "$OUT:/out" "$NIX_IMAGE" sh -c "
 set -eu
-cp /s/$PROBE /s/probe-src.txt /tmp/ 2>/dev/null || cp /s/$PROBE /tmp/
+cp /s/probe*.nix /s/probe-src.txt /tmp/
 top=\$(nix-instantiate /tmp/$PROBE 2>/dev/null | head -1)
 # The whole closure, not just the top: a dependency is a derivation too, and
 # a wrong edge shows up in the dependency's bytes as readily as in the top's.

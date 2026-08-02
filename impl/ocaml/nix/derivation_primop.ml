@@ -220,10 +220,25 @@ let derivation_primop (args : thunk list) : value =
     | Some t -> ( match force t with Bool b -> b | _ -> false)
     | None -> false
   in
+  (* The two env encodings, and the whole difference between them.
+     [docs/spec/canonical.md] section 1.8.
+
+     WITHOUT structured attributes, every value is COERCED to a string, so an
+     integer becomes "42" and a nested set is an error. WITH them, every value
+     keeps its type and the whole thing is carried as one JSON document, so an
+     implementation that coerces regardless produces valid output that hashes
+     differently.
+
+     Both paths accumulate context into the same accumulator, so the dependency
+     edges do not depend on which encoding is in use. That is the property
+     worth stating: the graph is a function of the VALUES, not of how they are
+     serialized. *)
   let env =
     List.filter_map
       (fun (k, t) ->
-        if List.mem k derived then None else Some (k, Json.String (coerce t)))
+        if List.mem k derived then None
+        else if structured_attrs then Some (k, Eval.to_json (force t) ctx)
+        else Some (k, Json.String (coerce t)))
       a
   in
   let fixed_output =

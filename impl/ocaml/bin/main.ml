@@ -181,6 +181,10 @@ let eval_file directory =
        in
        ( path,
          Img_drv_nix.Value.Context.singleton (Img_drv_nix.Value.Opaque path) )) ;
+  (* import and pathExists need the filesystem the evaluator library refuses to
+     open itself. Same reason as the store hook above. *)
+  Img_drv_nix.Builtins.read_source := read_file ;
+  Img_drv_nix.Builtins.path_exists := Sys.file_exists ;
   Img_drv_nix.Derivation_primop.reset () ;
   match
     Img_drv_nix.Builtins.eval_file

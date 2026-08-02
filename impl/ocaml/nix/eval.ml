@@ -6,6 +6,7 @@
 
 open Ast
 open Value
+open Img_drv
 
 let rec lookup (env : env) (x : string) : thunk =
   match attrs_find env.bindings x with
@@ -44,7 +45,9 @@ let add_to_store : (string -> string * Context.t) ref =
     string rather than ["true"]/["false"], null becomes empty, and a list is
     coerced elementwise and joined with spaces. Getting any of these wrong
     changes the env and therefore the store path. *)
-let rec coerce_to_string ?(list_ok = true) (v : value) : string * Context.t =
+let rec coerce_to_string ?(list_ok = true) ?(copy_to_store = true) (v : value) :
+    string * Context.t =
+  let coerce = coerce_to_string ~copy_to_store in
   match v with
   | Str (s, ctx) -> (s, ctx)
   | Int n -> (string_of_int n, Context.empty)
@@ -57,12 +60,16 @@ let rec coerce_to_string ?(list_ok = true) (v : value) : string * Context.t =
          resulting string carries that store path in its context, which is what
          puts it in inputSrcs. The copy needs NAR and a filesystem, and this
          library has neither on purpose (the OCaml IR core has zero
-         dependencies and the walk lives in the CLI), so it is injected. *)
-      !add_to_store p
+         dependencies and the walk lives in the CLI), so it is injected.
+
+         [copy_to_store] is FALSE for `builtins.toString`, and that is a real
+         semantic distinction rather than an optimisation: `"${./x}"` copies
+         and yields a context, `toString ./x` yields the bare path with none.
+         Getting it backwards puts a phantom entry in inputSrcs and moves the
+         store path, which is how this was found. *)
+      if copy_to_store then !add_to_store p else (p, Context.empty)
   | List items when list_ok ->
-      let parts =
-        List.map (fun t -> coerce_to_string ~list_ok:false (force t)) items
-      in
+      let parts = List.map (fun t -> coerce ~list_ok:false (force t)) items in
       ( String.concat " " (List.map fst parts),
         List.fold_left
           (fun acc (_, c) -> Context.union acc c)
@@ -73,7 +80,7 @@ let rec coerce_to_string ?(list_ok = true) (v : value) : string * Context.t =
          edge comes from: the resulting string carries the drv path in its
          context. *)
       match attrs_find a "outPath" with
-      | Some t -> coerce_to_string ~list_ok (force t)
+      | Some t -> coerce ~list_ok (force t)
       | None -> error "cannot coerce a set to a string")
   | v -> error "cannot coerce %s to a string" (type_name v)
 
@@ -291,15 +298,7 @@ and eval_op env o a b =
     | Value.Float x, Value.Int y -> Value.Float (ff x (float_of_int y))
     | x, _ -> error "value is %s while a number was expected" (type_name x)
   in
-  let cmp () =
-    match (eval env a, eval env b) with
-    | Value.Int x, Value.Int y -> compare x y
-    | Value.Float x, Value.Float y -> compare x y
-    | Value.Int x, Value.Float y -> compare (float_of_int x) y
-    | Value.Float x, Value.Int y -> compare x (float_of_int y)
-    | Str (x, _), Str (y, _) -> compare x y
-    | x, _ -> error "cannot compare %s" (type_name x)
-  in
+  let cmp () = value_compare (eval env a) (eval env b) in
   match o with
   | And -> if truthy (eval env a) then eval env b else Bool false
   | Or -> if truthy (eval env a) then Bool true else eval env b
@@ -332,6 +331,53 @@ and eval_op env o a b =
             (attrs_of_list
                (y @ List.filter (fun (k, _) -> not (List.mem_assoc k y)) x))
       | x, _ -> error "value is %s while a set was expected" (type_name x))
+
+(** A value as JSON, accumulating the string contexts it passes.
+
+    Needed twice: for [builtins.toJSON], and for [__structuredAttrs], the
+    SECOND env encoding ([docs/spec/canonical.md] section 1.8) that 1223 of the
+    2516 real derivations use. With it on, an attribute keeps its TYPE instead
+    of becoming a string variable, so an implementation that coerces everything
+    passes the ordinary probe and fails this one.
+
+    The context accumulator is the part that is easy to omit. A derivation
+    interpolated inside a structured attribute is still a dependency, and the
+    edge has to survive the encoding: without the [ctx] argument the JSON would
+    be right and the [inputDrvs] would be short an entry. *)
+and to_json (v : value) (ctx : Context.t ref) : Json.t =
+  match v with
+  | Value.Int i -> Json.Int i
+  | Value.Float f -> Json.Float f
+  | Bool b -> Json.Bool b
+  | Null -> Json.Null
+  | Str (s, c) ->
+      ctx := Context.union !ctx c ;
+      Json.String s
+  | Value.Path p -> Json.String p
+  | Value.List l -> Json.Array (List.map (fun t -> to_json (force t) ctx) l)
+  | Attrs a -> (
+      (* A derivation serializes as its outPath, exactly as it coerces. *)
+      match attrs_find a "outPath" with
+      | Some t when attrs_find a "type" <> None -> to_json (force t) ctx
+      | _ -> Json.Object (List.map (fun (k, t) -> (k, to_json (force t) ctx)) a)
+      )
+  | Lambda _ | Primop _ -> error "cannot convert a function to JSON"
+
+(** The order [<] uses, and the one [builtins.lessThan] and [sort] expose.
+
+    Mixed int/float comparison is by VALUE, not by widening one side and
+    hoping: [1 < 1.5] is true and [1 < 1.0] is false. Strings compare by bytes
+    and IGNORE context, which is right, because two strings that differ only in
+    what they depend on are the same string. *)
+and value_compare x y =
+  match (x, y) with
+  | Value.Int a, Value.Int b -> compare a b
+  | Value.Float a, Value.Float b -> compare a b
+  | Value.Int a, Value.Float b -> compare (float_of_int a) b
+  | Value.Float a, Value.Int b -> compare a (float_of_int b)
+  | Str (a, _), Str (b, _) -> compare a b
+  | Value.Path a, Value.Path b -> compare a b
+  | a, _ -> error "cannot compare %s" (type_name a)
 
 and equal x y =
   match (x, y) with

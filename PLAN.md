@@ -20,12 +20,12 @@ How it is used:
 
 Ordered. The top item is the next thing to do.
 
-1. **The evaluator, WIDENED.** The seam now exists in OCaml and is verified
-   byte for byte (see State), so the remaining work is breadth rather than
-   design: the `builtins` a real package reaches (`import`, `map`,
-   `listToAttrs`, `getAttr`, `foldl'`, the string and list families),
-   `<nixpkgs>` search paths, and then enough of `lib` and `stdenv` to evaluate
-   one real package.
+1. **The evaluator, widened FURTHER.** Fifty builtins now exist, including
+   `import` and `__structuredAttrs`, and `make eval-check` pins them at 10 of
+   10 against a live `nix-instantiate`. What is still missing for a real
+   package: `builtins.split` and `match`, which need a POSIX regex engine (a
+   dependency, so an approval); `<nixpkgs>` search paths; and then enough of
+   `lib` and `stdenv`.
 2. **Port the evaluator to Python, Rust and Go.** Deliberately AFTER widening
    it in one language: the parser was ported once its eight bug classes were
    written down as a specification, and the same discipline applies here.
@@ -41,6 +41,12 @@ rule. See the State entry below.
 - [x] Signature drafted (`docs/spec/signature.md`).
 - [x] Serialization derived EMPIRICALLY from real Nix, with golden files
       (`docs/spec/canonical.md`, `docs/spec/examples/`).
+- [x] Fifty builtins, gated on BYTES rather than on values: each one drives a
+      derivation attribute in `scripts/probe-builtins.nix`, so a subtly wrong
+      answer moves a store path instead of hiding in a value. Found one real
+      semantic error that way (`toString ./x` must NOT copy the file into the
+      store, while `"${./x}"` must), and covers `import` and the second env
+      encoding.
 - [x] The EVALUATOR seam, in OCaml. `derivation` as a primop emitting the IR,
       with laziness on `Lazy.t` (blackholing free, since `Lazy.Undefined` is
       exactly "infinite recursion encountered") and string contexts as a
