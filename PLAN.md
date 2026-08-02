@@ -20,27 +20,46 @@ How it is used:
 
 Ordered. The top item is the next thing to do.
 
-1. **A worked example that is not a conformance intent.** The transpiler is
+1. **The PARSER in Python, Rust and Go.** OCaml's reproduces Nix's own tree on
+   5000 of 5000 real nixpkgs files; the other three have none. Each uses its
+   language's standard generator per
+   `docs/decisions/2026-08-02-nix-frontend-build-not-reuse.md` (PLY, LALRPOP,
+   goyacc), and each has to clear the SAME two gates OCaml cleared: the 59
+   hand-written vectors in `docs/spec/nix-parse/vectors.tsv`, and
+   `make nixpkgs-parse` against real files.
+
+   The eight rules in `docs/abstractions.md` entry 13 are the specification
+   for this work, not a history: sort order, formals, inherit grouping,
+   identifier and keyword quoting, string chunk boundaries, indented-string
+   dedent with escape chunks excluded, path resolution at parse time, and the
+   `a.${k}` versus `a."${k}"` distinction. A port that reads only the OCaml
+   source will reproduce them; the value of the exercise is that each port is
+   checked against NIX, so a rule OCaml got wrong in a way the corpus has not
+   yet reached would show up as disagreement rather than as shared silence.
+
+   Order: Python (fastest to iterate), then Rust, then Go. Each lands with
+   `make nixpkgs-parse <lang>` green before the next starts.
+
+2. **A worked example that is not a conformance intent.** The transpiler is
    proved on eleven derivations nobody would write by hand. The next thing it
    has to survive is one real package expressed through `surface` in each
    language, with an overlay applied, instantiated against a pinned nixpkgs.
    That is where the surface's ergonomics get their first honest test.
-2. **Decide the `JSONValue` encoding in Go.** `docs/abstractions.md` entry 12
+3. **Decide the `JSONValue` encoding in Go.** `docs/abstractions.md` entry 12
    found that the sealed interface used by `impl/go/nix/` is strictly better
    than the discriminant struct used by `impl/go/json.go`, and was available
    there too. Changing it is a BREAKING change to the Go library's public API
    for a type verified across 2063 output paths, so it needs a decision, not a
    drive-by cleanup.
-3. **A Nix EXPRESSION front-end**, so a real nixpkgs package can be read and
-   not merely re-emitted. OCaml's parser now reproduces Nix's own tree on
-   5000 of 5000 real nixpkgs files (`make nixpkgs-parse`); the EVALUATOR is
-   what is left, and it has no `derivation` primop yet. The other three
-   languages have no parser at all.
-4. **Describe `scripts/probe.nix` in the eDSL** so `make differential` becomes
+4. **The EVALUATOR**, so a real nixpkgs package can be READ and not merely
+   re-emitted. Parsing is the easy half and is nearly done; the evaluator has
+   no `derivation` primop yet, and without one no parsed package can become
+   IR. This is where `import`, laziness and string contexts arrive.
+5. **Describe `scripts/probe.nix` in the eDSL** so `make differential` becomes
    a LIVE oracle for the eDSL rather than only for the parser. The ten golden
    examples already pin the eDSL against real Nix, but they are checked-in
    files; the probe runs against a real `nix-instantiate` on every push.
-5. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
+6. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
    format (`docs/spec/canonical.md` section 3). Now also the one gap in the
    `.drv` path rule: no derivation we produce has a non-empty `inputSrcs`, so
    that half of the references set is verified only by reading real files.
