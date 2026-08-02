@@ -27,8 +27,15 @@ FMT='test -z "$(gofmt -l .)" || { gofmt -l .; echo "run: make format"; exit 1; }
 # failure modes this crate can actually have.
 VET='go vet ./...'
 
+# -buildvcs=false is not a workaround, though it does happen to fix a CI
+# failure. `go build` stamps the binary with the state of the enclosing git
+# repository, which makes the OUTPUT depend on the VCS: the same source
+# produces different bytes from a different checkout, and the build shells out
+# to git, which fails outright when the container user does not own the
+# checkout (as on a CI runner: "error obtaining VCS status: exit status 128").
+# A project whose entire subject is reproducible builds should not stamp.
 case "$WHAT" in
-  build)  cmd='go build ./...' ;;
+  build)  cmd='go build -buildvcs=false ./...' ;;
   lint)   cmd="$FMT && $VET" ;;
   test)   cmd='go test -race ./...' ;;
   format) cmd='gofmt -w .' ;;
