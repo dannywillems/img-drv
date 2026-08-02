@@ -23,12 +23,6 @@
 
     {1 What is deliberately absent}
 
-    [builtins.split] and [match] need a POSIX regex engine, which OCaml's
-    standard library does not have and a dependency would need approval. They
-    are absent rather than approximated: a regex engine that is subtly
-    different is worse than none, because [lib] uses these for version parsing
-    and a wrong answer becomes a wrong store path.
-
     [currentSystem] and [currentTime] are impure by construction. The first is
     provided because nixpkgs cannot be evaluated without it; the second is not
     provided at all, since a reproducible IR must not be able to observe the
@@ -730,6 +724,112 @@ let get_env_primop args =
   ignore (want_string 0 args) ;
   str ""
 
+(* Regular expressions.
+
+   Nix specifies POSIX ERE: `builtins.match` and `split` are implemented with
+   std::regex under `std::regex::extended`, and the manual links the POSIX.1
+   ERE chapter. So the engine has to agree on SYNTAX and on leftmost-longest
+   SUBMATCH selection, and the second is the part that is easy to get wrong.
+
+   Re.Posix.compile is the only correct entry point, and this is a real
+   footgun rather than a style note: `Re.compile (Re.Posix.re s)` parses ERE
+   syntax while keeping Re's own non-POSIX match semantics. Only
+   `Re.Posix.compile` applies `Re.longest`. See
+   docs/decisions/2026-08-02-ocaml-re-posix-regex.md.
+
+   Compiled patterns are CACHED. Nix caches too, and it matters here for a
+   second reason: re builds its DFA lazily, so a pattern reused across a
+   thousand list elements amortises the automaton instead of rebuilding it. *)
+
+let regex_cache : (bool * string, Re.re) Hashtbl.t = Hashtbl.create 64
+
+(** [whole] anchors the pattern to the entire string.
+
+    Note what it is NOT: wrapping the source in [^(?:...)$]. POSIX ERE has no
+    non-capturing group, so that string does not even parse as ERE, and a
+    plain [^(...)$] would shift every capture index by one. [Re.whole_string]
+    is the combinator that anchors without touching the group numbering. *)
+let compiled ~whole pattern =
+  match Hashtbl.find_opt regex_cache (whole, pattern) with
+  | Some r -> r
+  | None ->
+      let r =
+        try
+          let parsed = Re.Posix.re pattern in
+          Re.Posix.compile (if whole then Re.whole_string parsed else parsed)
+        with _ -> error "invalid regular expression %S" pattern
+      in
+      Hashtbl.add regex_cache (whole, pattern) r ;
+      r
+
+(** A group that did not participate becomes [null], not the empty string.
+
+    [lib] branches on that distinction, so collapsing the two would give
+    plausible strings and wrong answers. *)
+let group_value g i =
+  match Re.Group.get_opt g i with Some s -> str s | None -> Null
+
+(** [match regex str]. Returns the capture groups, or null.
+
+    Matches the WHOLE string, not a substring: Nix uses [std::regex_match]
+    rather than [regex_search], so ["b"] does not match ["abc"]. An
+    implementation that searches instead passes every positive test and fails
+    every negative one. *)
+let match_primop args =
+  let pattern = want_string 0 args in
+  let s, ctx = want_string_ctx 1 args in
+  ignore ctx ;
+  match Re.exec_opt (compiled ~whole:true pattern) s with
+  | None -> Null
+  | Some g ->
+      Value.List
+        (List.init
+           (Re.Group.nb_groups g - 1)
+           (fun i -> lazy (group_value g (i + 1))))
+
+(** [split regex str]. Non-matching pieces interleaved with the group lists.
+
+    The shape is the surprise: the result ALTERNATES strings and lists, always
+    starts and ends with a string, and therefore always has an odd length. A
+    zero-width match still produces its pair, which is why the position must
+    advance past an empty match or this does not terminate. *)
+let split_primop args =
+  let pattern = want_string 0 args in
+  let s, _ = want_string_ctx 1 args in
+  let re = compiled ~whole:false pattern in
+  let n = String.length s in
+  let out = ref [] in
+  let emit v = out := v :: !out in
+  let last = ref 0 in
+  let rec collect pos =
+    if pos > n then ()
+    else
+      match Re.exec_opt ~pos re s with
+      | None -> ()
+      | Some g ->
+          let a, b = Re.Group.offset g 0 in
+          (* Cut the piece EAGERLY. The obvious [lazy (String.sub s !last ...)]
+             reads the mutable cursor when the thunk is FORCED, by which time it
+             has advanced past [a] and the length is negative. Laziness over
+             mutable state captures the REFERENCE, not the value, and this is
+             the one place in the evaluator where those two are in the same
+             scope. *)
+          let piece = String.sub s !last (a - !last) in
+          let groups =
+            List.init
+              (Re.Group.nb_groups g - 1)
+              (fun i -> lazy (group_value g (i + 1)))
+          in
+          emit (lazy (str piece)) ;
+          emit (lazy (Value.List groups)) ;
+          last := b ;
+          if b = a then collect (a + 1) else collect b
+  in
+  collect 0 ;
+  let tail = String.sub s !last (n - !last) in
+  emit (lazy (str tail)) ;
+  Value.List (List.rev !out)
+
 let primop name arity impl = (name, lazy (Primop (name, arity, impl)))
 
 (** The environment an expression is evaluated in.
@@ -761,6 +861,8 @@ let rec global_env () : env =
       primop "concatStringsSep" 2 concat_strings_sep_primop;
       primop "replaceStrings" 3 replace_strings_primop;
       primop "unsafeDiscardStringContext" 1 unsafe_discard_context_primop;
+      primop "match" 2 match_primop;
+      primop "split" 2 split_primop;
       (* lists *)
       primop "length" 1 length_primop;
       primop "head" 1 head_primop;

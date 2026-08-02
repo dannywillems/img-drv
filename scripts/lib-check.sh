@@ -29,6 +29,8 @@ fi
 
 # Pinned by commit, so a failure reproduces. Cached, because it is a large
 # download and this gate is meant to be runnable on a laptop.
+PROBES="${PROBE:-probe-lib.nix probe-regex.nix}"
+
 if [ ! -d "$TREE/lib" ]; then
   echo ">> fetching nixpkgs $NIXPKGS_REV"
   mkdir -p "$TREE"
@@ -36,15 +38,19 @@ if [ ! -d "$TREE/lib" ]; then
     | tar xz -C "$TREE" --strip-components=1
 fi
 
+run_probe() {
+  PROBE="$1"
+  shift
+
 rm -rf "${OUT:?}"
 mkdir -p "$OUT/expected" "$OUT/ocaml"
 
-echo ">> asking the pinned nix to instantiate probe-lib.nix"
+echo ">> asking the pinned nix to instantiate $PROBE"
 docker run --rm -v "$HERE:/s:ro" -v "$TREE:/nixpkgs:ro" -v "$OUT:/out" \
-  -e NIX_PATH=nixpkgs=/nixpkgs "$NIX_IMAGE" sh -c '
+  -e NIX_PATH=nixpkgs=/nixpkgs -e PROBE="$PROBE" "$NIX_IMAGE" sh -c '
 set -eu
-cp /s/probe-lib.nix /tmp/
-top=$(nix-instantiate /tmp/probe-lib.nix 2>/dev/null | head -1)
+cp /s/probe-lib.nix /s/probe-regex.nix /tmp/
+top=$(nix-instantiate /tmp/$PROBE 2>/dev/null | head -1)
 cp "$top" /out/expected/
 '
 want=$(basename "$(find "$OUT/expected" -name '*.drv' | head -1)")
@@ -52,9 +58,9 @@ echo "   $want"
 
 fail=0
 for impl in "$@"; do
-  echo ">> $impl: evaluating probe-lib.nix with our own evaluator"
+  echo ">> $impl: evaluating $PROBE with our own evaluator"
   mkdir -p "$OUT/$impl"
-  if ! EVAL_FILE=/w/scripts/probe-lib.nix \
+  if ! EVAL_FILE="/w/scripts/$PROBE" \
        EVAL_EXTRA_MOUNT="$TREE:/nixpkgs:ro" \
        EVAL_NIX_PATH=nixpkgs=/nixpkgs \
        "$HERE/ml.sh" eval "build/lib-check/$impl"; then
@@ -74,4 +80,11 @@ for impl in "$@"; do
   fi
 done
 
-[ "$fail" -eq 0 ]
+return "$fail"
+}
+
+status=0
+for probe in $PROBES; do
+  run_probe "$probe" "$@" || status=1
+done
+[ "$status" -eq 0 ]

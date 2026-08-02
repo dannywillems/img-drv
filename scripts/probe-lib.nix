@@ -9,9 +9,9 @@
 # The gate is still bytes: each result feeds a derivation attribute, so a lib
 # function that returns a subtly different string moves the store path.
 #
-# NOT here, and deliberately: lib.escapeShellArg and the other functions built
-# on builtins.match. They need a POSIX ERE engine, which is a dependency and so
-# an approval. See docs/decisions/ for the request.
+# The functions built on builtins.match (escapeShellArg, splitString, ...) live
+# in scripts/probe-regex.nix, which compares our POSIX ERE engine against the
+# one Nix itself uses.
 let
   lib = import <nixpkgs/lib>;
 in
@@ -27,6 +27,8 @@ derivation {
   mapped = lib.concatMapStringsSep "," (x: "<${x}>") [ "p" "q" ];
   padded = lib.fixedWidthString 6 "0" "42";
   removed = lib.removePrefix "lib" "libfoo";
+  esc = lib.escapeShellArg "a b'c;d";
+  splitstr = lib.concatStringsSep "+" (lib.splitString "." "1.2.3");
 
   # Lists.
   uniq = toString (lib.unique [ 1 2 2 3 1 ]);

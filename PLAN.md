@@ -25,7 +25,8 @@ Ordered. The top item is the next thing to do.
    10 against a live `nix-instantiate`. What is still missing for a real
    package: `builtins.split` and `match`, which need a POSIX regex engine (a
    dependency, so an approval); `<nixpkgs>` search paths; and then enough of
-   `lib` and `stdenv`.
+   `lib` and `stdenv`. (`builtins.match`/`split` are DONE: `re` was approved
+   and audited, see `docs/decisions/2026-08-02-ocaml-re-posix-regex.md`.)
 2. **Port the evaluator to Python, Rust and Go.** Deliberately AFTER widening
    it in one language: the parser was ported once its eight bug classes were
    written down as a specification, and the same discipline applies here.
@@ -41,6 +42,14 @@ rule. See the State entry below.
 - [x] Signature drafted (`docs/spec/signature.md`).
 - [x] Serialization derived EMPIRICALLY from real Nix, with golden files
       (`docs/spec/canonical.md`, `docs/spec/examples/`).
+- [x] Real nixpkgs `lib` evaluates byte-identically (`make lib-check`), which
+      is the first input to the evaluator not chosen to be evaluable. It found
+      a bug on its first run: `substring` with a NEGATIVE length means "to the
+      end", and `lib.removePrefix` is written that way.
+- [x] `builtins.match` and `split`, on `re` (ocaml-re) with `Re.Posix.compile`
+      for leftmost-longest. Audited and approved; the decision record covers
+      the licence, the DFA-vs-backtracking difference from Nix's own engine,
+      and the fact that Go gets POSIX ERE free while Python and Rust do not.
 - [x] Fifty builtins, gated on BYTES rather than on values: each one drives a
       derivation attribute in `scripts/probe-builtins.nix`, so a subtly wrong
       answer moves a store path instead of hiding in a value. Found one real

@@ -1029,3 +1029,60 @@ Binding* (LICS 1999); Fiore and Hur, *Second-Order Equational Logic* (CSL
 2010); and for the fixed-point reading of laziness, any treatment of Kleene
 iteration on a domain, where a blackhole is exactly the detection that the
 iteration is not ascending.
+
+## 19. Gate on the store path, not on the value
+
+**Structure:** a separating functional, in the model-theoretic sense of
+"The frame" in `mathematical-abstraction.md`. `scripts/probe-builtins.nix`,
+`probe-more.nix`, `probe-regex.nix`, `probe-lib.nix`.
+
+Fifty-odd builtins were added to the evaluator, and not one assertion was
+written about any of them. Every one instead drives a derivation ATTRIBUTE, and
+the check is that the derivation's store path is the one `nix-instantiate`
+computes.
+
+That works because the path is a **separating functional** for the theory. A
+wrong builtin changes a string, which changes the env, which changes the input
+hash, which changes the 32-character filename. Formally: two structures that
+disagree on ANY reachable value are distinguished by a single equality test on
+the path, so one comparison discharges fifty obligations at once, and there is
+no way to be wrong-but-passing. Compare a unit test per builtin, which
+discharges exactly the obligations someone thought to write down.
+
+This is the same shape as the differential parser oracle (entry 13) and the
+retraction law (entry 15), and it keeps paying:
+
+- `toString ./x` must NOT copy the file into the store, while `"${./x}"` must.
+  Both produce a plausible string. The difference is only in `inputSrcs`.
+- `substring start (-1) s` means "to the end", not "empty". `lib.removePrefix`
+  is literally `substring (stringLength prefix) (-1) str`, so treating the
+  negative length as empty turns every `removePrefix` into `""`.
+- `listToAttrs` keeps the FIRST duplicate, the opposite of `//`.
+- `replaceStrings` tries patterns IN ORDER, so a shorter one listed first beats
+  a longer match.
+
+Every one of those satisfies every axiom I had written down and is still wrong.
+That is exactly the NON-STANDARD MODEL question from `mathematical-abstraction.md`
+made operational: rather than asking "what implementation satisfies my laws and
+is still wrong", pick a functional fine enough that no such implementation
+exists, and let the oracle enumerate them for you.
+
+**The corollary about corpora.** `make lib-check` runs real nixpkgs `lib`, and
+it is the first input to the evaluator that was not chosen to be evaluable. It
+found the `substring` bug immediately. A corpus you wrote tells you about
+yourself; the parser learned this at 0 of 40 (entry 13) and the evaluator
+learned it again.
+
+**And one bug the gate found that is about the HOST language, not about Nix.**
+`builtins.split` cut its pieces as `lazy (String.sub s !last (a - !last))` while
+`last` was a mutable cursor. A thunk closes over the REFERENCE, so `!last` was
+read at force time, after the cursor had advanced past `a`, and the length went
+negative. Laziness over mutable state captures the reference and not the value.
+The evaluator is full of laziness and had exactly one place where a mutable
+cursor shared a scope with it, and that place broke.
+
+**To learn more:** this is the testing-side reading of the satisfaction relation
+in Goguen and Burstall's institutions, and it is why `docs/spec/store-paths.md`
+opens by warning about "the right shape with the wrong identity": a
+content-addressed name is a fingerprint of the entire value, so equality of
+names is equality of everything the name covers.
