@@ -39,14 +39,68 @@ arrow between them.
 Everything else is an arrow. Naming the arrows is what keeps the modules from
 growing into each other:
 
-| arrow | module | status |
-| --- | --- | --- |
-| EXPR to `.nix` | `expr/printer` | not started; this is the transpiler |
-| `.nix` to EXPR | `expr/parser` | done in OCaml (`ocamllex` + `menhir`) |
-| EXPR to DRV | `expr/eval` | started in OCaml |
-| DRV to `.drv` | `ir/aterm` | done, four languages |
-| `.drv` to DRV | `ir/aterm` | done, four languages |
-| DRV to store path | `ir/store` | done, four languages |
+| arrow             | module        | status                                |
+| ----------------- | ------------- | ------------------------------------- |
+| EXPR to `.nix`    | `expr/emit`   | the transpiler; OCaml and Python      |
+| `.nix` to EXPR    | `expr/parser` | done in OCaml (`ocamllex` + `menhir`) |
+| EXPR to DRV       | `expr/eval`   | started in OCaml; no `derivation` yet |
+| DRV to `.drv`     | `ir/aterm`    | done, four languages                  |
+| `.drv` to DRV     | `ir/aterm`    | done, four languages                  |
+| DRV to store path | `ir/store`    | done, four languages                  |
+
+## The IR is the narrow waist, and that is what makes N languages affordable
+
+There will be more than four languages. The layout above is what keeps the
+cost of the fifth, and the fiftieth, from growing.
+
+Every front-end is an arrow INTO the IR, and equality is asserted THERE:
+
+```
+   OCaml ---\
+   Python ---\
+   Rust   ----+--->  DRV  --->  .drv bytes  <--- real Nix
+   Go     ---/        ^
+   <next> ---/        |
+                 equality lives here
+```
+
+Three consequences, in increasing order of how much they matter.
+
+**1. Verification is linear, not quadratic.** Comparing N implementations
+pairwise is `N(N-1)/2` comparisons; at four that is six, at ten it is
+forty-five. But byte-equality is transitive, so the whole family collapses to N
+comparisons against one fixed target. Adding a language costs ONE arrow and ONE
+check. That is the whole reason to have an IR rather than N mutually-agreeing
+front-ends.
+
+**2. Equality must NOT be asserted at the source layer.** `.nix` output is not
+comparable across languages, and requiring it to be would be a category error
+rather than a stricter standard. A HOAS lambda has no name until the surface
+invents one, so emitted source is a CHOICE OF REPRESENTATIVE from an
+alpha-equivalence class, and which one you get depends on host evaluation
+order: OCaml evaluates list elements right to left and emits `a4` where Python
+emits `a1`. Both are right. Instantiating decides the quotient, because Nix
+quotients names away and the `.drv` is the normal form. So `make
+transpile-check` compares meaning, not spelling, and is stronger than a source
+diff for it.
+
+**3. N agreeing implementations prove nothing without an EXTERNAL oracle.**
+This is the important one and it is not hypothetical. The `.drv` path bug
+(`docs/abstractions.md` entry 10) had four implementations agreeing byte for
+byte, in four languages spanning the typing axis, and all four were wrong the
+same way. Agreement among front-ends measures whether the SPEC was transcribed
+consistently; it cannot measure whether the spec is right. Only real Nix can do
+that.
+
+So the conformance obligation for a new language is exactly two things, and
+neither of them is "diff against the other implementations":
+
+| obligation                                   | oracle                       | cost                          |
+| -------------------------------------------- | ---------------------------- | ----------------------------- |
+| emits the same `.drv` for the 11 intents     | the goldens, which Nix named | `make conformance`            |
+| its `.nix` instantiates to those same `.drv` | real Nix, pinned by digest   | `make transpile-check <lang>` |
+
+Both targets are fixed, so both are O(1) per language.
 
 ## The layout each implementation follows
 
@@ -139,14 +193,14 @@ separate deliberately.
 Each arrow gets an oracle, and none of them is a unit test we wrote about
 ourselves:
 
-| layer | oracle | current state |
-| --- | --- | --- |
-| DRV to `.drv` | real Nix, via `make conformance` | 11 intents, 4 implementations |
-| `.drv` to DRV | real nixpkgs closures, `make corpus` | 2516 derivations |
-| store paths | `make differential` against pinned Nix | 7 of 7, plus 1259 of 1259 |
-| `.nix` to EXPR | `nix-instantiate --parse`, 59 vectors | OCaml only |
-| EXPR to `.nix` | **the commuting square** (below) | not started |
-| EXPR to DRV | the same square | not started |
+| layer          | oracle                                 | current state                 |
+| -------------- | -------------------------------------- | ----------------------------- |
+| DRV to `.drv`  | real Nix, via `make conformance`       | 11 intents, 4 implementations |
+| `.drv` to DRV  | real nixpkgs closures, `make corpus`   | 2516 derivations              |
+| store paths    | `make differential` against pinned Nix | 7 of 7, plus 1259 of 1259     |
+| `.nix` to EXPR | `nix-instantiate --parse`, 59 vectors  | OCaml only                    |
+| EXPR to `.nix` | **the commuting square** (below)       | not started                   |
+| EXPR to DRV    | the same square                        | not started                   |
 
 The square is the one that matters for the transpiler, and it is worth stating
 as a target before any code is written:

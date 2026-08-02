@@ -515,3 +515,53 @@ output-path checks.
 not the Lean-regime one. The remaining gap is `inputSrcs`, where NAR
 serialization is still unimplemented, so no corpus derivation exercises a
 non-empty `inputSrcs` that we produced ourselves.
+
+## 11. Two quotients, and why equality belongs at the IR
+
+**Structure:** a quotient by an equivalence, and the difference between a law
+that holds on terms and one that holds only in the quotient.
+
+The Python transpiler port turned up the same shape twice in one afternoon, in
+two places that look unrelated.
+
+**Alpha-equivalence, at the source layer.** OCaml emits `a4` where Python emits
+`a1` for the same corpus, because OCaml evaluates list elements right to left
+and Python left to right, so the fresh supply is consumed in a different order.
+A HOAS lambda has no name until the surface invents one, so the emitted `.nix`
+is a CHOICE OF REPRESENTATIVE from an alpha-equivalence class. Which
+representative you get is a fact about the host, not about the term.
+
+**Nix's `//` laws, at the overlay layer.** `compose(overlay_id, o)` emits
+`({ } // o)`, not `o`, and the two bracketings of `compose` nest `//`
+differently. So overlays are a monoid up to Nix's semantics and NOT up to
+syntax. `impl/ocaml/nix/surface.ml` claimed the stronger version; the Python
+tests state the honest one (nothing is lost, the later overlay still wins).
+
+In both cases the fix is the same and it is not to strengthen the code: it is
+to say which equality the law is stated in, and then to decide that equality
+with something that actually computes the quotient. **Instantiating through
+real Nix is that something.** Nix quotients names away, evaluates `//`, and the
+`.drv` is the normal form, so comparing `.drv` bytes decides both quotients at
+once.
+
+This is why the project's equality lives at the IR and not at the source, and
+the reason generalises past these two cases: the source layer will keep
+acquiring laws that hold only up to evaluation (`let`-floating, `rec` vs
+non-`rec`, string-context propagation), and the IR layer has none of them
+because it has no binders at all. A first-order theory has no alpha-equivalence
+to quotient by. That is the same first-order/second-order split as entry 8 and
+`theory.md` section 8, showing up as a testing property rather than a typing
+one.
+
+**The N-language consequence.** Equality at the IR makes conformance LINEAR:
+byte-equality is transitive, so N front-ends need N checks against one fixed
+target rather than `N(N-1)/2` pairwise diffs. Adding a language is one arrow and
+one check.
+
+**And the trap that entry 10 already sprung.** N implementations agreeing with
+each other is not evidence the spec is right; the `.drv` references bug had four
+agreeing and all four wrong. Agreement measures whether a spec was transcribed
+consistently. Only an external oracle measures whether the spec is correct. So
+the count of languages is a measure of PORTABILITY, never of CORRECTNESS, and
+the two obligations have to stay separate: `make conformance` for the first,
+`make transpile-check` against real Nix for the second.

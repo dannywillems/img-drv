@@ -122,9 +122,16 @@ let if_ c t f = If (c, t, f)
 (** {1 Composability: overlays as mixins}
 
     An overlay is [final: prev: { ... }], which is Cook and Palsberg's wrapper
-    over a generator ([docs/theory.md] section 8). Composition is asymmetric
-    and associative with an identity, so overlays form a MONOID, and [fix] is
-    the map out of it. *)
+    over a generator ([docs/theory.md] section 8), and [fix] is the map out of
+    it.
+
+    Overlays form a MONOID under {!compose}, but only UP TO NIX SEMANTICS, not
+    up to syntax. [compose overlay_id o] emits [({ } // o)] rather than [o],
+    and the two bracketings of [compose] nest [//] differently; those terms are
+    equal when Nix evaluates them and are not equal as syntax. Stating the
+    stronger law would be an over-claim, and the honest one is what
+    [impl/python/tests/test_nix_surface.py] tests: nothing is lost, and the
+    later overlay still wins. See [docs/abstractions.md] entry 11. *)
 
 (** final, previous, additions *)
 type overlay = t -> t -> t
