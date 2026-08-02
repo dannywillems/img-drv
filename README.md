@@ -84,6 +84,7 @@ pinned. See [`PLAN.md`](PLAN.md#engineering-baseline-runs-alongside-every-phase)
 ```
 PLAN.md                 the living plan, and where tasks come from
 docs/theory.md          why finite products suffice, and what that forces
+docs/architecture.md    the two term algebras, and the layout they imply
 docs/abstractions.md    which structure each piece of code realizes, its
                         laws, and where each law is tested
 docs/nix-internals.md   how Nix actually works, with sources
