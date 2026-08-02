@@ -32,8 +32,10 @@ Ordered. The top item is the next thing to do.
    for a type verified across 2063 output paths, so it needs a decision, not a
    drive-by cleanup.
 3. **A Nix EXPRESSION front-end**, so a real nixpkgs package can be read and
-   not merely re-emitted. OCaml's parser is done; the evaluator handles enough
-   for the square but has no `derivation` primop yet.
+   not merely re-emitted. OCaml's parser now reproduces Nix's own tree on
+   5000 of 5000 real nixpkgs files (`make nixpkgs-parse`); the EVALUATOR is
+   what is left, and it has no `derivation` primop yet. The other three
+   languages have no parser at all.
 4. **Describe `scripts/probe.nix` in the eDSL** so `make differential` becomes
    a LIVE oracle for the eDSL rather than only for the parser. The ten golden
    examples already pin the eDSL against real Nix, but they are checked-in
@@ -65,6 +67,12 @@ Ordered. The top item is the next thing to do.
       This is the first oracle in the project where NIX chooses the answer
       rather than validating one we chose, and it found a bug four green gates
       had missed.
+- [x] **The parser, against real nixpkgs.** `make nixpkgs-parse`: 5000 of 5000
+      real files parse to the same tree `nix-instantiate --parse` prints. It
+      scored 0 of 40 on its first run against a parser that already passed 59
+      hand-written vectors, and fixing that took eight distinct corrections,
+      one of which was a missing AST distinction rather than a printer bug.
+      See `docs/abstractions.md` entry 13.
 - [x] **The transpiler in all four languages**: `ast`, `emit`, `surface` and
       the overlay monoid, with the one-way dependency on the IR that
       `docs/architecture.md` requires. No parser generator is a dependency of
@@ -498,6 +506,13 @@ Resolved, kept here only so the resolution is findable:
 ---
 
 ## Plan log
+
+- **2026-08-02** Pointed the parser at real nixpkgs and it scored 0 of 40,
+  having passed 59 hand-written vectors. Eight rules of Nix were wrong or
+  missing, from attribute-set sort order to the fact that an escape-produced
+  chunk takes no part in an indented string's dedenting. Now 5000 of 5000, with
+  the corpus wired into CI the same way `make corpus` is: tree pinned by commit
+  so failures reproduce, sample random so coverage keeps growing.
 
 - **2026-08-02** The transpiler landed in all four languages and the commuting
   square closes 44 of 44. Two measurements came out of the ports. Emitted

@@ -72,6 +72,9 @@ let rec eval (env : env) (e : t) : value =
   | Str parts | Ind_str parts ->
       let s, ctx = eval_parts env parts in
       Str (s, ctx)
+  (* An interpolated path concatenates to a PATH, not a string: its first part
+     is the already-resolved prefix, so the result is still a location. *)
+  | Path_interp parts -> Value.Path (fst (eval_parts env parts))
   | Not e -> (
       match eval env e with
       | Bool b -> Bool (not b)
@@ -135,6 +138,7 @@ and static_names binds =
   let of_attr = function
     | Aid n -> Some n
     | Astr [Lit n] -> Some n
+    | Adyn (Str [Lit n]) -> Some n
     | _ -> None
   in
   List.concat_map
@@ -209,6 +213,7 @@ and inherit_names env from names =
 and attr_name env = function
   | Aid x -> x
   | Astr parts -> fst (eval_parts env parts)
+  | Adyn e -> fst (eval_parts env [Anti e])
 
 and select_opt env (v : value) (path : attrpath) : thunk option =
   match path with

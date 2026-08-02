@@ -21,7 +21,7 @@ let error lexbuf msg = raise (Error (msg, Lexing.lexeme_start_p lexbuf))
 
 (** What the lexer is in the middle of. The [}] token is ambiguous without it:
     it closes an attribute set in [Expr] and ends an antiquotation otherwise. *)
-type state = Expr | In_string | In_ind_string
+type state = Expr | In_string | In_ind_string | In_path
 
 let stack : state list ref = ref [Expr]
 let push s = stack := s :: !stack
@@ -40,6 +40,34 @@ let unescape c =
   | 'r' -> '\r'
   | 't' -> '\t'
   | c -> c
+
+(* Resolve the backslash escapes inside a matched run.
+
+   Nix's string rule matches a MAXIMAL run that already contains its escapes
+   (lexer.l), so the unescaping happens on the whole token rather than one
+   escape at a time. Reproducing that boundary matters: the parts of a string
+   are never merged afterwards, so where the lexer splits is exactly what the
+   printed tree shows. *)
+let unescape_run s =
+  let b = Buffer.create (String.length s) in
+  let n = String.length s in
+  let rec go i =
+    if i < n then
+      if s.[i] = '\\' && i + 1 < n then begin
+        Buffer.add_char b (unescape s.[i + 1]) ;
+        go (i + 2)
+      end
+      else begin
+        Buffer.add_char b s.[i] ;
+        go (i + 1)
+      end
+  in
+  go 0 ;
+  Buffer.contents b
+
+(* A run can span newlines, so the line counter is advanced for each one. *)
+let count_lines lexbuf s =
+  String.iter (fun c -> if c = '\n' then Lexing.new_line lexbuf) s
 }
 
 let digit = ['0'-'9']
@@ -53,6 +81,11 @@ let float =
 let path_char = alpha | digit | ['.' '_' '+' '-']
 let path = path_char* ('/' path_char+)+ '/'?
 let hpath = '~' ('/' path_char+)+ '/'?
+(* Looser than `path`: the prefix of an INTERPOLATED path may end in a bare
+   slash, as in `./${v}`, which `path` rejects because it wants a segment after
+   every separator. *)
+let path_prefix = path_char* ('/' path_char*)+
+let hpath_prefix = '~' ('/' path_char*)+
 let spath = '<' path_char+ ('/' path_char+)* '>'
 let uri_scheme = alpha (alpha | digit | ['+' '-' '.'])*
 let uri_char =
@@ -82,11 +115,24 @@ rule token = parse
 
   | float as s { FLOAT (float_of_string s) }
   | int as s { INT (int_of_string s) }
+  (* A path containing an interpolation, `./x/${v}.nix`. Nix lexes it as a
+     sequence and the parser builds a concatenation, which is why `--parse`
+     prints it as `(/abs/x/ + v + ".nix")` rather than as one path. Maximal
+     munch keeps this from stealing an ordinary path: the rule only fires when
+     the prefix is actually followed by an interpolation. *)
+  | (path_prefix as s) "${" { push In_path; push Expr; PATH_START s }
+  | (hpath_prefix as s) "${" { push In_path; push Expr; PATH_START s }
   | path as s { PATH s }
   | hpath as s { PATH s }
   | spath as s { SPATH (String.sub s 1 (String.length s - 2)) }
 
   | '"' { push In_string; DQUOTE }
+  (* The opening delimiter swallows any spaces and ONE newline after it, which
+     is why an indented string written on its own line does not begin with a
+     blank line. This lives in the lexer because that is where Nix puts it
+     (src/libexpr/lexer.l), and doing it in the parser instead would make the
+     dedent below see a leading newline Nix never sees. *)
+  | "''" ' '* '\n' { push In_ind_string; IND_OPEN }
   | "''" { push In_ind_string; IND_OPEN }
 
   | "${" { push Expr; DOLLAR_CURLY }
@@ -135,38 +181,90 @@ and comment = parse
   | _ { comment lexbuf }
 
 (* A double-quoted string. Returns one STR chunk at a time; the parser
-   assembles them, so an interpolation is just a token in the middle. *)
+   assembles them, so an interpolation is just a token in the middle.
+
+   The chunk boundaries MATTER, because nothing merges them afterwards: what
+   the lexer splits is exactly what the printed tree shows. So the run below is
+   transcribed from NixOS/nix lexer.l rather than invented. *)
 and string_part = parse
   | '"' { pop (); DQUOTE }
   | "${" { push Expr; DOLLAR_CURLY }
-  | "\\${" { STR "${" }
-  | '\\' (_ as c) { STR (String.make 1 (unescape c)) }
-  | '\n' { Lexing.new_line lexbuf; STR "\n" }
-  | [^ '"' '\\' '$' '\n']+ as s { STR s }
-  | '$' { STR "$" }
+  (* Nix's FIRST string rule uses flex TRAILING CONTEXT: a run ending in a
+     dollar that is followed by the closing quote. That dollar cannot be
+     absorbed by the ordinary run below, which requires a character after it,
+     so without this rule it becomes its own part and a string ending in a
+     dollar prints as a two-part concatenation instead of one literal. Real
+     case: a regex anchored with a trailing dollar, which is everywhere in
+     nixpkgs and in none of the 59 hand-written vectors.
+
+     ocamllex has no trailing context, so the closing quote is matched and then
+     PUSHED BACK by rewinding one character, which lets the closing-quote rule
+     run next exactly as flex would. *)
+  | ([^ '$' '"' '\\'] | '$' [^ '{' '"' '\\'] | '\\' _ | '$' '\\' _)* '$' '"'
+      { let s = Lexing.lexeme lexbuf in
+        let s = String.sub s 0 (String.length s - 1) in
+        lexbuf.Lexing.lex_curr_pos <- lexbuf.Lexing.lex_curr_pos - 1;
+        lexbuf.Lexing.lex_curr_p <-
+          {lexbuf.Lexing.lex_curr_p with
+            Lexing.pos_cnum = lexbuf.Lexing.lex_curr_p.Lexing.pos_cnum - 1};
+        count_lines lexbuf s; STR (unescape_run s) }
+  (* One MAXIMAL run: ([^$"\] | $[^{"\] | \. | $\.)+
+     A `$` that does not begin an interpolation, and every escape, stay INSIDE
+     the run, which is what makes `"a$b"` one part rather than three. *)
+  | ([^ '$' '"' '\\'] | '$' [^ '{' '"' '\\'] | '\\' _ | '$' '\\' _)+ as s
+      { count_lines lexbuf s; STR (unescape_run s) }
+  (* Nix's fallback for a `$` or backslash the run could not absorb, which
+     happens at the end of a string: `"a$"` is `("a" + "$")`, not `"a$"`. *)
+  | '$' | '\\' | "$\\" { STR (Lexing.lexeme lexbuf) }
   | eof { error lexbuf "unterminated string" }
 
 (* An indented string. The dedenting that Nix applies is deliberately NOT done
    here: it is a property of the whole literal, so it belongs to the parser
    action that has all the parts. *)
 and ind_string_part = parse
+  (* One MAXIMAL run: ([^$'] | $[^{'] | '[^'$])+
+     Note what it EXCLUDES: a quote before another quote, or before `$`, so the
+     two-quote escapes below still get their chance. Those escapes are separate
+     parts and Nix does NOT merge them with their neighbours, which is why an
+     escaped dollar between two words prints as ("a" + "$" + "b") and not as
+     "a$b". Merging them looked right and was wrong; only the nixpkgs corpus
+     said so. *)
+  | ([^ '$' '\''] | '$' [^ '{' '\''] | '\'' [^ '\'' '$'])+ as s
+      { count_lines lexbuf s; STR s }
   | "''" { pop (); IND_CLOSE }
   | "${" { push Expr; DOLLAR_CURLY }
-  | "'''" { STR "''" }
-  | "''$" { STR "$" }
-  | "''\\" (_ as c) { STR (String.make 1 (unescape c)) }
-  | '\n' { Lexing.new_line lexbuf; STR "\n" }
-  | [^ '\'' '$' '\n']+ as s { STR s }
-  | '\'' { STR "'" }
-  | '$' { STR "$" }
+  (* Every chunk that is NOT the plain run above takes no part in indentation,
+     which is what Nix's StringToken.hasIndentation records, and it matters for
+     a reason that is easy to miss. An escaped newline (two quotes, a backslash
+     and an n) produces a REAL newline character, so if the dedent pass scanned
+     it the text after would look like the start of an unindented line and the
+     whole string would stop being dedented. Nix does not scan these chunks at
+     all; they merely end the current run of start-of-line whitespace, exactly
+     as an antiquotation does. One line in one nixpkgs file showed this. *)
+  | "'''" { ESTR "''" }
+  | "''$" { ESTR "$" }
+  | "''\\" (_ as c) { ESTR (String.make 1 (unescape c)) }
+  | '\'' { ESTR "'" }
+  | '$' { ESTR "$" }
   | eof { error lexbuf "unterminated indented string" }
+
+(* The tail of an interpolated path: literal segments and further
+   interpolations, until something that cannot continue a path. The final rule
+   matches the EMPTY string, which is how the end is detected without consuming
+   the character that ended it; popping the state first means the next call
+   goes back to the expression lexer, so it cannot loop. *)
+and path_part = parse
+  | "${" { push Expr; DOLLAR_CURLY }
+  | (path_char | '/')+ as s { PATH_STR s }
+  | "" { pop (); PATH_END }
 
 {
 (** The entry point menhir drives: dispatch on the state stack, so the same
-    token stream carries expressions and string chunks. *)
+    token stream carries expressions, string chunks and path segments. *)
 let read lexbuf =
   match top () with
   | Expr -> token lexbuf
   | In_string -> string_part lexbuf
   | In_ind_string -> ind_string_part lexbuf
+  | In_path -> path_part lexbuf
 }

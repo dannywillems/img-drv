@@ -117,6 +117,10 @@ canonical-check: ## Canonicalizing a real derivation must change nothing
 corpus: ## Pull N random nixpkgs packages and verify against them (needs docker)
 	./scripts/fetch-corpus.sh $(N)
 
+.PHONY: nixpkgs-parse
+nixpkgs-parse: ## Parse N random real nixpkgs files, diff the tree vs Nix
+	./scripts/nixpkgs-parse.sh $(N)
+
 .PHONY: lint-shell
 lint-shell: ## Lint shell scripts
 	docker run --rm -v "$$PWD:/w" -w /w \

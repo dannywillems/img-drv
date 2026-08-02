@@ -123,6 +123,92 @@ let emit_nix directory =
   Printf.printf "%d expressions written to %s\n" (List.length corpus) directory ;
   0
 
+(** Differential-test the PARSER against real Nix, on real expressions.
+
+    [directory] holds pairs: [x.nix] is the source and [x.expected] is what the
+    pinned [nix-instantiate --parse] printed for it. We parse [x.nix] and print
+    in the same form; the two must match byte for byte.
+
+    This pins tree SHAPE rather than merely "it parsed", which is the whole
+    reason the oracle is [--parse] and not a plain evaluation. Two things to
+    know about it, both recorded in
+    [docs/decisions/2026-08-02-nix-frontend-build-not-reuse.md]: it performs
+    static scope resolution and so REJECTS a file with a free variable, and it
+    prints a DESUGARED tree, so our printer has to reproduce the desugaring and
+    not just the parse. Files Nix itself refuses are skipped by the harness
+    before they get here. *)
+let parse_check directory =
+  let expected =
+    Sys.readdir directory |> Array.to_list
+    |> List.filter (fun f -> Filename.check_suffix f ".expected")
+    |> List.sort compare
+  in
+  let read path =
+    let ic = open_in_bin path in
+    let n = in_channel_length ic in
+    let s = really_input_string ic n in
+    close_in ic ;
+    s
+  in
+  (* Nix expands `~` at parse time, so the harness records the oracle's HOME
+     and it is replayed here; without it a tilde path resolves differently in
+     the two containers. *)
+  let home =
+    let p = Filename.concat directory "home" in
+    if Sys.file_exists p then String.trim (read p) else ""
+  in
+  let ok = ref 0 and bad = ref 0 in
+  (* The harness names each pair by index because the pinned Nix image has no
+     sed to flatten a path with, so the real path is carried alongside. *)
+  let origin base =
+    let p = Filename.concat directory (base ^ ".path") in
+    if Sys.file_exists p then String.trim (read p) else base
+  in
+  List.iter
+    (fun exp_file ->
+      let base = Filename.remove_extension exp_file in
+      let src = read (Filename.concat directory (base ^ ".nix")) in
+      let want = String.trim (read (Filename.concat directory exp_file)) in
+      (* Nix resolves a relative path against the directory of the file it is
+         written in, so the parser has to be told where the source came from or
+         every `./foo.nix` prints differently. *)
+      let source_dir = Filename.dirname (origin base) in
+      match Img_drv_nix.Nix.parse_and_print ~base:source_dir ~home src with
+      | Ok got when String.equal (String.trim got) want -> incr ok
+      | Ok got ->
+          incr bad ;
+          if !bad <= 5 then begin
+            (* Real nixpkgs expressions print to thousands of characters, so
+               showing both in full says nothing. Show the first divergence
+               with a window either side, which is where the bug is. *)
+            let got = String.trim got in
+            let n = min (String.length want) (String.length got) in
+            let rec first i =
+              if i >= n then n
+              else if want.[i] = got.[i] then first (i + 1)
+              else i
+            in
+            let d = first 0 in
+            let window s =
+              let from = max 0 (d - 30) in
+              let len = min 90 (String.length s - from) in
+              String.sub s from len
+            in
+            Printf.printf "MISMATCH %s (at offset %d)\n" (origin base) d ;
+            Printf.printf "  want ...%s...\n" (window want) ;
+            Printf.printf "  got  ...%s...\n" (window got)
+          end
+      | Error msg ->
+          incr bad ;
+          if !bad <= 5 then
+            Printf.printf "PARSE FAILED %s: %s\n" (origin base) msg)
+    expected ;
+  Printf.printf
+    "%d/%d real nixpkgs expressions parse to the same tree as Nix\n"
+    !ok
+    (!ok + !bad) ;
+  if !bad = 0 then 0 else 1
+
 let () =
   match Sys.argv with
   | [|_; command; directory|] ->
@@ -143,6 +229,7 @@ let () =
         | "canonical" -> canonical_check directory
         | "examples" -> emit_examples directory
         | "transpile" -> emit_nix directory
+        | "parsecheck" -> parse_check directory
         | other ->
             Printf.eprintf "unknown command: %s\n" other ;
             exit 2
@@ -150,6 +237,7 @@ let () =
       exit code
   | _ ->
       prerr_endline
-        "usage: img-drv [verify|roundtrip|canonical|examples|transpile] \
+        "usage: img-drv \
+         [verify|roundtrip|canonical|examples|transpile|parsecheck] \
          <directory>" ;
       exit 2

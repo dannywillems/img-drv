@@ -19,6 +19,106 @@ let with_alias p x =
   | Pset f -> Pset {f with alias = Some x}
   | p -> p
 
+(* Drop empty literals, which would otherwise print as `"" + ...`.
+
+   Note what this does NOT do: merge adjacent literals. Nix does not merge them
+   either. Its lexer matches a MAXIMAL run so the pieces arrive already joined,
+   and the pieces it keeps separate (a two-quote escape, a trailing `$`) stay
+   separate in the printed tree. Our lexer now draws the same boundaries, so
+   merging here would over-join. *)
+let drop_empty (parts : part list) : part list =
+  match List.filter (function Lit "" -> false | _ -> true) parts with
+  | [] -> [Lit ""]
+  | ps -> ps
+
+(* Nix STRIPS the common indentation from an indented string at PARSE time, so
+   the AST holds the dedented text and `--parse` prints one plain string.
+   Transcribed from `stripIndentation` in NixOS/nix src/libexpr/parser.y.
+
+   Two passes. The first finds the minimum indentation over all lines that
+   actually have content: a line that is entirely spaces does not count, and an
+   interpolation counts as content. The second removes that many leading spaces
+   from each line, and then drops a final line that is nothing but spaces. *)
+let strip_indentation (parts : (part * bool) list) : part list =
+  let min_indent = ref max_int and at_start = ref true and cur = ref 0 in
+  let saw c =
+    if !at_start then
+      if c = ' ' then incr cur
+      else if c = '\n' then cur := 0
+      else begin
+        at_start := false ;
+        if !cur < !min_indent then min_indent := !cur
+      end
+    else if c = '\n' then begin
+      at_start := true ;
+      cur := 0
+    end
+  in
+  (* A chunk that does not carry indentation is not scanned at all; it only
+     ends the current start-of-line whitespace, like an antiquotation. *)
+  let ends_line () =
+    if !at_start then begin
+      at_start := false ;
+      if !cur < !min_indent then min_indent := !cur
+    end
+  in
+  List.iter
+    (function Lit s, true -> String.iter saw s | _ -> ends_line ())
+    parts ;
+  let min_indent = if !min_indent = max_int then 0 else !min_indent in
+  let at_start = ref true and dropped = ref 0 in
+  let n = List.length parts in
+  let out =
+    List.mapi
+      (fun i (part, indented) ->
+        match part with
+        | _ when not indented ->
+            at_start := false ;
+            dropped := 0 ;
+            part
+        | Anti _ -> part
+        | Lit s ->
+            let b = Buffer.create (String.length s) in
+            String.iter
+              (fun c ->
+                if !at_start then
+                  if c = ' ' then begin
+                    if !dropped >= min_indent then Buffer.add_char b c ;
+                    incr dropped
+                  end
+                  else if c = '\n' then begin
+                    dropped := 0 ;
+                    Buffer.add_char b c
+                  end
+                  else begin
+                    at_start := false ;
+                    dropped := 0 ;
+                    Buffer.add_char b c
+                  end
+                else begin
+                  Buffer.add_char b c ;
+                  if c = '\n' then begin
+                    at_start := true ;
+                    dropped := 0
+                  end
+                end)
+              s ;
+            let s2 = Buffer.contents b in
+            (* The closing delimiter usually sits on its own indented line, and
+               that trailing run of spaces is not part of the value. *)
+            if i = n - 1 then
+              match String.rindex_opt s2 '\n' with
+              | Some p
+                when String.for_all
+                       (fun c -> c = ' ')
+                       (String.sub s2 (p + 1) (String.length s2 - p - 1)) ->
+                  Lit (String.sub s2 0 (p + 1))
+              | _ -> Lit s2
+            else Lit s2)
+      parts
+  in
+  drop_empty out
+
 let str_or_lit parts =
   (* An attribute path element written as a string is an Astr; the printer
      folds it back to a plain name when it is constant, which is what Nix
@@ -28,7 +128,8 @@ let str_or_lit parts =
 
 %token <int> INT
 %token <float> FLOAT
-%token <string> ID STR PATH SPATH URI
+%token <string> ID STR ESTR PATH SPATH URI PATH_START PATH_STR
+%token PATH_END
 %token IF THEN ELSE ASSERT WITH LET IN REC INHERIT OR_KW
 %token DQUOTE IND_OPEN IND_CLOSE DOLLAR_CURLY
 %token LCURLY RCURLY LPAREN RPAREN LBRACK RBRACK
@@ -125,21 +226,38 @@ expr_simple:
   | x = ID { Var x }
   | n = INT { Int n }
   | f = FLOAT { Float f }
-  | p = PATH { Path p }
+  | p = PATH { Path (resolve_path p) }
+  (* The lexer hands over the prefix having ALREADY consumed the opening
+     `${`, so the first interpolation is spelled out here rather than coming
+     from `path_parts`. *)
+  | p = PATH_START e = expr RCURLY rest = path_parts
+      { Path_interp (Anti (Path (resolve_path_prefix p)) :: Anti e :: rest) }
   | p = SPATH { Search_path p }
   | u = URI { Uri u }
-  | DQUOTE parts = string_parts DQUOTE { Str parts }
-  | IND_OPEN parts = string_parts IND_CLOSE { Ind_str parts }
+  | DQUOTE parts = string_parts DQUOTE { Str (drop_empty (List.map fst parts)) }
+  (* After dedenting, an indented string with a single literal part IS a plain
+     string: Nix does not wrap a one-element concatenation, so `''a''` prints
+     as `"a"` and not as `("a")`. *)
+  | IND_OPEN parts = string_parts IND_CLOSE
+      { match strip_indentation parts with
+        | [Lit s] -> Str [Lit s]
+        | ps -> Ind_str ps }
   | LPAREN e = expr RPAREN { e }
   | REC LCURLY b = binds RCURLY { Attr_set {recursive = true; binds = b} }
   | LCURLY b = binds1 RCURLY { Attr_set {recursive = false; binds = b} }
   | empty_braces { Attr_set {recursive = false; binds = []} }
   | LBRACK items = list_items RBRACK { List items }
 
+path_parts:
+  | PATH_END { [] }
+  | s = PATH_STR rest = path_parts { Lit s :: rest }
+  | DOLLAR_CURLY e = expr RCURLY rest = path_parts { Anti e :: rest }
+
 string_parts:
   | { [] }
-  | s = STR rest = string_parts { Lit s :: rest }
-  | DOLLAR_CURLY e = expr RCURLY rest = string_parts { Anti e :: rest }
+  | s = STR rest = string_parts { (Lit s, true) :: rest }
+  | s = ESTR rest = string_parts { (Lit s, false) :: rest }
+  | DOLLAR_CURLY e = expr RCURLY rest = string_parts { (Anti e, false) :: rest }
 
 list_items:
   | { [] }
@@ -169,8 +287,8 @@ attrpath:
 attr:
   | x = ID { Aid x }
   | OR_KW { Aid "or" }
-  | DQUOTE parts = string_parts DQUOTE { str_or_lit parts }
-  | DOLLAR_CURLY e = expr RCURLY { Astr [Anti e] }
+  | DQUOTE parts = string_parts DQUOTE { str_or_lit (drop_empty (List.map fst parts)) }
+  | DOLLAR_CURLY e = expr RCURLY { Adyn e }
 
 (* Non-empty only; the empty case is `empty_braces` above. This mirrors
    parser.y:570-583, where `formals` is likewise non-nullable and `'{' '}'` is

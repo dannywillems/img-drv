@@ -112,3 +112,20 @@ jobs:
       # fixed corpus never would: hand-written examples agreed 12 times out of
       # 12 while real ones disagreed 323 times out of 403.
       - run: make corpus N=10
+
+  nixpkgs-parse:
+    name: random real nixpkgs expressions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # The PARSER's differential oracle, and the same design as `corpus`: the
+      # nixpkgs tree is pinned by commit so a failure reproduces, while WHICH
+      # files are sampled is random so CI keeps reaching constructions a fixed
+      # list never would. `nix-instantiate --parse` re-prints the tree it
+      # parsed, so this pins tree SHAPE and not merely "it parsed".
+      #
+      # It found eight distinct bug classes on its first run, against a parser
+      # that already passed 59 hand-written vectors.
+      - run: make nixpkgs-parse N=300

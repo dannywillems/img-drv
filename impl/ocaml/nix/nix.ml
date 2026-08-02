@@ -7,8 +7,13 @@
 exception Error of string
 
 (** Parse Nix source. *)
-let parse_string (src : string) : (Ast.t, string) result =
+let parse_string ?(base = "") ?(home = "") (src : string) :
+    (Ast.t, string) result =
   Lexer.reset () ;
+  (* Nix resolves relative paths against the directory of the file being
+     parsed, so a caller that has a real file must say where it came from. *)
+  Ast.base_dir := base ;
+  Ast.home_dir := home ;
   let lexbuf = Lexing.from_string src in
   try Ok (Parser.main Lexer.read lexbuf) with
   | Lexer.Error (msg, pos) ->
@@ -28,5 +33,6 @@ let parse_string (src : string) : (Ast.t, string) result =
 
 (** Parse and print in [nix-instantiate --parse] form, which is what the
     differential test compares. *)
-let parse_and_print (src : string) : (string, string) result =
-  Result.map Printer.to_string (parse_string src)
+let parse_and_print ?(base = "") ?(home = "") (src : string) :
+    (string, string) result =
+  Result.map Printer.to_string (parse_string ~base ~home src)

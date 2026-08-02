@@ -63,6 +63,18 @@ let rec pp b (e : t) =
   | Path p -> buf_add b p
   | Search_path p -> buf_add b ("<" ^ p ^ ">")
   | Uri u -> buf_add b ("\"" ^ escape u ^ "\"")
+  | Path_interp parts ->
+      (* The leading path is absolute after parsing, so this emits an absolute
+         interpolated path, which is valid Nix and denotes the same file. *)
+      List.iter
+        (function
+          | Lit s -> buf_add b s
+          | Anti (Path p) -> buf_add b p
+          | Anti e ->
+              buf_add b "${" ;
+              pp b e ;
+              buf_add b "}")
+        parts
   | Str parts -> pp_string b parts
   | Ind_str parts -> pp_string b parts
   | Not e ->
@@ -163,6 +175,10 @@ and pp_string b parts =
 
 and pp_attr b = function
   | Aid x -> buf_add b x
+  | Adyn e ->
+      buf_add b "${" ;
+      pp b e ;
+      buf_add b "}"
   | Astr [Lit s] -> buf_add b ("\"" ^ escape s ^ "\"")
   | Astr parts ->
       buf_add b "${" ;

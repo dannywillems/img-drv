@@ -77,6 +77,17 @@ in that format, and must match the pinned Nix byte for byte. Run over nixpkgs,
 that is tens of thousands of real vectors, which is a far better guarantee than
 any single implementation's test suite.
 
+This was not a prediction that aged well or badly, it was measured. The OCaml
+parser passed 59 hand-written vectors and then scored **0 of 40** on real
+nixpkgs files. Eight distinct rules of Nix were wrong or missing; the list is
+in `docs/abstractions.md` entry 13. It is now 5000 of 5000, and `make
+nixpkgs-parse` runs in CI on a fresh random sample of a commit-pinned tree.
+
+The argument for writing our own front-end therefore comes with a warning it
+did not originally carry: a parser that passes a curated vector set is not
+close to done, and the gap is not in the exotic corners. It is in attribute
+ordering, string chunking and path resolution, which every real file uses.
+
 Two things to know about the oracle before relying on it:
 
 - `--parse` performs **static scope resolution** and fails with "undefined
@@ -92,12 +103,12 @@ which is what AGENTS rule 1 requires ("a parser generator (menhir, and
 equivalents elsewhere) for anything larger such as the Nix language") and what
 Nix itself does: `parser.y` is Bison and `lexer.l` is Flex.
 
-| language | lexer | parser |
-| --- | --- | --- |
-| OCaml | `ocamllex` | `menhir` |
-| Rust | LALRPOP's own lexer, or `logos` | `LALRPOP` |
-| Go | hand-written scanner in the goyacc idiom | `goyacc` |
-| Python | `PLY` (`lex`/`yacc`), the classic port | `PLY` |
+| language | lexer                                    | parser    |
+| -------- | ---------------------------------------- | --------- |
+| OCaml    | `ocamllex`                               | `menhir`  |
+| Rust     | LALRPOP's own lexer, or `logos`          | `LALRPOP` |
+| Go       | hand-written scanner in the goyacc idiom | `goyacc`  |
+| Python   | `PLY` (`lex`/`yacc`), the classic port   | `PLY`     |
 
 An earlier draft of this document argued for hand-written recursive descent
 with Pratt precedence climbing, on the grounds that four generators mean four

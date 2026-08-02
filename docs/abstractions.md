@@ -622,3 +622,56 @@ first time the typing axis has said something about a RUNTIME property (the
 surface is stateful and not safe to share between threads) rather than about
 which invalid values are representable. Rust does not make the surface
 thread-safe; it makes the thread-unsafety impossible to leave undeclared.
+
+## 13. Eight bug classes in one afternoon, and what a corpus is FOR
+
+**Structure:** none new. This entry is about the ORACLE, and it is the
+strongest evidence yet for the rule entry 10 stated abstractly.
+
+The Nix parser passed **59 hand-written differential vectors**. Pointed at real
+nixpkgs, it scored **0 out of 40**. After the fixes below it scores **5000 of
+5000**, and the vectors still pass unchanged.
+
+Every one of these is a rule of Nix that no one would guess and that the 59
+vectors happened not to exercise. Each was established by PROBING the pinned
+Nix, not by reading our own code:
+
+| #   | what was wrong                                                                                                            | why the hand vectors missed it                                          |
+| --- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| 1   | attribute sets and `let` print SORTED, not in source order                                                                | a two-attribute example is usually already sorted                       |
+| 2   | lambda formals sort too                                                                                                   | same                                                                    |
+| 3   | plain `inherit`s merge and come first; `inherit (e)` groups keep source order                                             | no vector had both kinds                                                |
+| 4   | an attribute name is quoted unless it is an identifier, and keywords are quoted (except `or`)                             | no vector used a version number or a keyword as a name                  |
+| 5   | string parts are NEVER merged; the lexer's maximal run draws the boundary, and a trailing `$` needs flex trailing context | `$out` and a regex `...$` are in every real package                     |
+| 6   | indented strings are dedented at parse time, and escape-produced chunks take NO part in that                              | one `''\n` in one file silently disabled dedenting for the whole string |
+| 7   | relative paths and `~` resolve to absolute AT PARSE TIME                                                                  | a vector has no file to be relative to                                  |
+| 8   | `a.${k}` and `a."${k}"` are DIFFERENT nodes and print differently                                                         | the AST had conflated them                                              |
+
+Two of these deserve to be called out as more than oversights.
+
+**The AST was wrong, not just the printer.** Number 8 forced a new constructor:
+`a.${k}` holds the expression directly, `a."${k}"` holds a string containing
+it, and Nix prints `(a)."${k}"` for the first and `{ "${(k)}" = 1; }` for the
+second. The extra parentheses ARE the string wrapper showing through. A
+differential oracle that only checked "did it parse" could never surface a
+missing distinction in the tree; one that compares the PRINTED TREE does,
+because the shape is observable.
+
+**The over-merge was caused by a fix.** Number 5 first went in as "merge
+adjacent literals", which made `$out` correct and was wrong: Nix does not merge
+anything, its lexer simply matches longer runs, and the chunks it does keep
+apart stay apart. The corpus rejected the plausible fix and accepted the
+faithful one. That is the difference between reproducing behaviour and
+transcribing a mechanism, and only a corpus this size can tell them apart.
+
+**The measurement to keep.** 59 curated vectors bought 0% on real input.
+The vectors were not useless: they pin the desugarings precisely and they still
+guard against regressions. But they measured what we thought to ask, and the
+corpus measured what Nix actually does. Both gates run; only one of them could
+have found these.
+
+**And the shape of the remaining risk.** `make nixpkgs-parse` samples RANDOMLY
+from a tree pinned by commit, which is the same design as `make corpus` and for
+the same reason: a fixed list stops finding things the moment it passes. A
+failure is reproducible because the tree is pinned; coverage keeps growing
+because the sample is not.
