@@ -321,15 +321,49 @@ Honest caveats, since this is the part most likely to be underestimated:
 
 ## Phase 3 (conditional): the module system
 
-Only if 0 to 2 succeed, and only if there is an appetite for months rather than
-weeks.
+Only if 0 to 2 succeed, and only with appetite for months rather than weeks.
 
-A standalone, law-abiding module system: options with types, merge as a
-join-semilattice, priorities as an explicit deviation from it, evaluation as a
-fixed point. Property-test the laws (commutativity, associativity,
-idempotence), which is exactly what Nix's own implementation does not do.
+A standalone, law-abiding module system. NOT an extension of the IR: a module
+is a FUNCTION of the final config, and `theory.md` section 1 restricts the
+signature to finite products. The module layer sits ABOVE the eDSL, evaluates
+to a config, and host-language code then calls `derivation(...)`. Keeping that
+boundary is the whole design.
 
-This is arguably the most reusable idea in NixOS and nobody has extracted it.
+This is the SECOND falsification test, and a sharper one than Go was. An option
+type is existentially quantified over its value type. Rust reaches it with trait
+objects, OCaml with first-class modules or GADTs, Python with a Protocol; Go has
+no existentials and degrades to `any` plus runtime type assertions. Prediction
+recorded IN ADVANCE, so it can be scored honestly: this is where Go breaks
+rather than merely getting verbose. Go survived phase 2 because the IR is
+first-order; an option type is not.
+
+- [ ] Option types as n-ary merge algebras: check, merge, default, docs.
+- [ ] Priorities as a lexicographic product of a min-semilattice with the value
+      semilattice (`mkDefault`/`mkForce`/`mkOverride`), NOT as a deviation from
+      the laws: it preserves them. See `theory.md` section 6.
+- [ ] Definitions carry their SOURCE, so a conflict names both modules. This is
+      the thing NixOS users actually complain about.
+- [ ] Evaluation by STATIC dependency declaration and topological sort, not by a
+      lazy knot: termination and a cycle error naming the two options, which is
+      a real improvement over "infinite recursion encountered". The cost is
+      dynamically computed dependency sets; the shape is applicative rather
+      than monadic.
+- [ ] The laws, property-tested, which Nix does not do: commutativity and
+      idempotence per type (`listOf` and `unique` expected to FAIL, and marked
+      so); `mkForce` absorption; empty set yields the declared default;
+      idempotence of evaluation; and module order unobservable for any config
+      built only from non-concatenating types. That last one is the same shape
+      as the "env insertion order is not observable" law already in all four
+      eDSL suites.
+- [ ] The documented NON-law, with a countermodel test:
+      `merge(A union B) != merge({merge A, merge B})`. The n-ary merge does not
+      decompose into binary merges, because an intermediate result loses its
+      priority. Any implementation that folds pairwise gets `mkForce` wrong.
+- [ ] Generated docs and a JSON schema from the option tree, and a config diff.
+
+Exit test: two modules that set the same option, one with `mkForce`, merge to
+the same config regardless of import order, and the property suite is green with
+the `listOf` and `unique` failures explicitly EXPECTED rather than absent.
 
 ## Explicitly out of scope
 
@@ -377,6 +411,35 @@ Resolved, kept here only so the resolution is findable:
 ---
 
 ## Plan log
+
+- **2026-08-02** Corrected `theory.md` section 6, which blamed the wrong thing.
+  Priorities do NOT break the module system's algebra: keeping only the
+  minimum-priority definitions is a lexicographic product of a min-semilattice
+  with the value semilattice, and it preserves commutativity, associativity and
+  idempotence. What actually leaves the semilattice is the TYPES, `listOf`
+  (concatenation: associative, not commutative, not idempotent) and `unique`
+  (errors on two EQUAL definitions, so not idempotent).
+
+  Two further corrections. The merge is genuinely N-ARY and does not decompose
+  into binary merges, because an intermediate result loses its priority, so
+  `merge(A union B) != merge({merge A, merge B})` and any pairwise fold gets
+  `mkForce` wrong. And the knot is LAZINESS, not Kleene iteration on a cpo:
+  Knaster-Tarski gives existence for monotone maps, Nix gives "infinite
+  recursion encountered".
+
+  Every number was verified against nixpkgs master rather than recalled, since
+  the previous text was wrong from memory: priorities at `lib/modules.nix`
+  1569-1574, the `min` fold at 1433, order defaults at 1605-1606,
+  `mergeEqualOption` for the scalars at `lib/types.nix` 376/399/482/519, and
+  `mergeOneOption` at `lib/options.nix:451`. One correction to the question as
+  asked: `imports` depending on `config` is NOT statically forbidden, it fails
+  as infinite recursion with an `addErrorContext` hint (`modules.nix:269`).
+
+  Phase 3 rewritten accordingly, and it now records a PREDICTION in advance:
+  an option type is existentially quantified over its value type, Go has no
+  existentials, so phase 3 is where Go breaks rather than merely getting
+  verbose. Go survived phase 2 because the IR is first-order; an option type
+  is not.
 
 - **2026-08-02** Go landed, and the falsification test came back NEGATIVE: the
   first-order signature needed nothing beyond finite products, and three

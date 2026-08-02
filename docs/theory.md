@@ -114,19 +114,101 @@ descriptions. It does not converge machines, and it must not grow an `apply`
 verb. If an effect layer is ever wanted it gets a separate, deliberately small
 interface whose guarantee is a tested idempotence rather than a hash.
 
-## 6. A note on the module system, for later
+## 6. The module system, and where its algebra actually bends
 
-NixOS modules are functions of the final configuration, and evaluation computes
-a **fixed point**. Option types supply the merge and priorities break ties.
+NixOS modules are functions of the final configuration, and evaluation ties a
+**knot**. Option types supply the merge and priorities select which definitions
+survive.
 
 For module ORDER not to matter, that merge must be commutative, associative and
-idempotent: a **join-semilattice**. This is a law, it is property-testable, and
-Nix's priority machinery (`mkDefault`, `mkForce`, `mkOrder`) is precisely where
-it bends away from a clean one.
+idempotent: a **join-semilattice**. That much is a law and it is
+property-testable. An earlier version of this section then blamed the priority
+machinery for breaking it. That was wrong in three ways, and the corrections are
+sharper than the original claim.
 
-Extracting a small, law-abiding module system as a standalone library is
-arguably the most reusable idea in the whole of NixOS, and nobody has done it.
-It is phase 3, and only if phases 0 to 2 succeed.
+### Priorities preserve the laws; the LIST types break them
+
+Model a definition as a pair `(p, v)`. The merge keeps only the definitions at
+the MINIMUM priority and applies the type's merge to those, which is the
+**lexicographic product of a min-semilattice on priority with the value
+semilattice**:
+
+```
+(50,a) join (100,b)  = (50,a)
+(100,b) join (100,c) = (100, merge{b,c})
+```
+
+Commutative and associative whenever the underlying merge is, so `mkForce` is
+not lawless: it is a level in a graded semilattice.
+
+What genuinely leaves the semilattice is the TYPES:
+
+- `listOf` merges by **concatenation**: associative, not commutative, not
+  idempotent. `mkOrder`/`mkBefore`/`mkAfter` exist to give an explicit sort key
+  so the non-commutativity is controllable rather than dependent on evaluation
+  order. The honest structure is an **ordered monoid**, not a semilattice.
+- `mergeOneOption` (`types.unique`) errors on two definitions even when they are
+  EQUAL, so `x join x` is bottom. Not idempotent.
+- Scalars (`bool`, `int`, `float`, `str`) use `mergeEqualOption`: all
+  definitions must agree. That IS a semilattice, the **flat lattice** on the
+  value set with a top element "conflict".
+
+So the accurate statement is: a join-semilattice **per option type**, and
+exactly the concatenating and unique types fall out of it.
+
+### The merge is n-ary and does NOT decompose into binary merges
+
+This is the sharpest point, and the one an implementer will get wrong. Merging
+`{(50,a), (100,b)}` yields `a`, and the result no longer carries a priority.
+Merge that with `(100,c)` and you get `merge{a,c}`, where merging all three at
+once gives `a`:
+
+```
+merge(A union B)  !=  merge({merge A, merge B})
+```
+
+The definition multiset is the free commutative monoid on definitions and the
+merge is a map out of it; the laws say exactly that this map is well defined on
+the quotient. It is **not a fold**, and any implementation that folds pairwise
+gets `mkForce` wrong.
+
+### The knot is laziness, not Kleene iteration
+
+Nix computes `fix f = let x = f x in x` and relies on laziness.
+Well-definedness comes from the value dependency graph being acyclic and
+productive, not from monotonicity on a cpo with an ascending chain condition.
+Knaster-Tarski gives existence for monotone maps; Nix gives you "infinite
+recursion encountered". Conflating the two would overclaim, and a strict-language
+implementation gets to choose which it actually wants (see `PLAN.md` phase 3).
+
+### Cross-field connection
+
+A join-semilattice of states with monotone updates and merge = join is exactly
+the **CvRDT convergence condition**. The module system is almost a state-based
+CRDT, and `listOf` is precisely where it stops being one. That is why module
+order sometimes matters in NixOS and usually does not.
+
+### Verified against source
+
+Checked in `nixpkgs` master rather than recalled, because this section
+previously asserted the wrong thing from memory:
+
+| claim | source |
+| --- | --- |
+| `mkOptionDefault` 1500, `mkDefault` 1000, unset 100, `mkImageMediaOverride` 60, `mkForce` 50, `mkVMOverride` 10 | `lib/modules.nix:1569-1574` |
+| the merge keeps only MINIMUM-priority definitions | `lib/modules.nix:1433`, a `foldl'` with `min` |
+| `mkBefore` 500, `mkAfter` 1500, default order 1000 | `lib/modules.nix:1605-1606` |
+| `bool`, `int`, `float`, `str` use `mergeEqualOption` | `lib/types.nix:376,399,482,519` |
+| `mergeOneOption = mergeUniqueOption { message = ""; }` | `lib/options.nix:451` |
+| `imports` depending on `config` is NOT statically forbidden | `lib/modules.nix:269`: it fails as infinite recursion, with an `addErrorContext` hint naming the likely cause |
+
+One naming trap worth carrying: the variable computing that minimum is called
+`highestPrio`, where "highest" means highest-PRECEDENCE and therefore the
+lowest number.
+
+The structural readings above (n-ary non-decomposability, the lexicographic
+priority product, lists as the real deviation, laziness rather than Kleene) are
+our framing; the table is Nix's code.
 
 ## 7. Self-reference is avoided by FACTORING, not by a fixed point
 
