@@ -128,6 +128,68 @@ Extracting a small, law-abiding module system as a standalone library is
 arguably the most reusable idea in the whole of NixOS, and nobody has done it.
 It is phase 3, and only if phases 0 to 2 succeed.
 
+## 7. Self-reference is avoided by FACTORING, not by a fixed point
+
+A derivation's output paths are a hash of the derivation that contains them.
+Written down naively that is
+
+```
+p = H(D(p))
+```
+
+an equation whose solution would be a hash of a text containing that very hash.
+Nothing forces such a solution to exist, and iteration cannot find one, because
+a hash function is built precisely to destroy the structure an iteration would
+need. Every content-addressed system meets this problem, and it is worth being
+explicit that Nix does not solve it. It arranges not to have it.
+
+Let `pi` be the MASKING map that replaces each of a derivation's own output
+paths by the empty string, in the outputs list and in the env entries whose KEY
+is an output name. Let `f` compute paths from a masked derivation. The
+definition is
+
+```
+outputs(d) = f(pi(d))
+```
+
+Since the right-hand side depends on `d` only through `pi(d)`, it is constant on
+the fibres of `pi`, so it factors through the quotient `D/ker(pi)`. That is the
+universal property of a quotient, and the payoff is concrete: computing output
+paths is a TOTAL function evaluated in one pass, not a search for a fixed point.
+
+Three consequences, and the repository depends on all three.
+
+1. **Verification exists at all.** Because the paths are a FUNCTION of the
+   masked form, the equation `recorded outputs == f(pi(d))` is a checkable
+   claim rather than a definition. Anyone can recompute and compare, which is
+   `Corpus.verify` (`impl/python/src/img_drv/corpus.py:139`) reproducing 1259
+   of 1259 real output paths. A genuinely self-referential hash would admit no
+   such check, and with it would go the ability to know a build's address
+   before building it.
+2. **The factorization is deliberately BROKEN in exactly one place.** A
+   derivation's own paths go through `pi`; the hash by which it is known as
+   someone else's INPUT does not, because there the paths are already known and
+   are part of what identifies it (`store.py:155`, `corpus.py:99`). Applying
+   `pi` in both places leaves every fixed-output derivation's own path correct
+   and everything downstream of it wrong, which is invisible until something
+   depends on a fetch.
+3. **`pi` masks by KEY, not by value.** It blanks an env entry whose key is an
+   output name, never an output path that merely occurs inside some other value
+   (`aterm.py:245`). A textual substitution cannot draw that distinction, which
+   is why a regex implementation passed 12 of 12 hand-written examples and
+   failed 323 of 403 real ones.
+
+Contrast with section 5. The effect layer's convergence is a GENUINE fixed
+point, reached by Kleene iteration of a monotone map. The artifact layer looks
+like one and is not, and recognizing that is exactly what makes it computable
+in a single pass.
+
+**Consequence for this repo:** an eDSL builds the derivation with its output
+paths blank, computes them from the masked form, and substitutes them in
+(`impl/python/src/img_drv/edsl.py:369`). An implementation that iterates toward
+a path assignment, or that reaches one by any other route, is doing something
+this specification does not describe.
+
 ## Sources
 
 - F. W. Lawvere, "Functorial Semantics of Algebraic Theories", PNAS 50 (1963),
@@ -141,5 +203,12 @@ It is phase 3, and only if phases 0 to 2 succeed.
   format, <https://nix.dev/manual/nix/2.34/store/derivation/>
 
 Sections 1 to 4 apply standard results to build-description eDSLs; the
-two-algebra split in section 5 and the semilattice reading in section 6 are our
-framing.
+two-algebra split in section 5, the semilattice reading in section 6, and the
+factoring reading in section 7 are our framing. Nix's own implementation of the
+section 7 behaviour is named `hashDerivationModulo`; we have not read that
+source, and every rule in `docs/spec/` was established empirically against a
+Nix pinned by digest, then checked against real nixpkgs derivations.
+
+A running record of which structure each piece of the implementation realizes,
+and where its laws are tested, is kept in
+[`abstractions.md`](abstractions.md).

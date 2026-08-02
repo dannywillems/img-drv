@@ -101,6 +101,13 @@ need no permission.
 - `docs/decisions/` for why, with costs accepted and a revisit condition.
 - `docs/spec/` for anything that defines bytes. Changing bytes is a breaking
   change.
+- `docs/theory.md` for a result that FORCES a design constraint. Normative, and
+  meant to stay small.
+- `docs/abstractions.md` for which structure a piece of code realizes, its
+  laws, and where each law is tested. **Append an entry whenever a feature
+  larger than a refactor lands.** A structure is a specification: every law it
+  obeys is a property the code owes, and the entries have already found a real
+  over-claim and a real bug.
 
 ## Traps already paid for
 

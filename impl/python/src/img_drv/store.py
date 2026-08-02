@@ -27,6 +27,8 @@ __all__ = [
     "BASE32_ALPHABET",
     "STORE",
     "base32",
+    "base32_decode",
+    "base32_length",
     "compress",
     "drv_path",
     "fixed_output_input_hash",
@@ -61,6 +63,42 @@ def base32(data: bytes) -> str:
             c |= data[idx + 1] << (8 - offset)
         out.append(BASE32_ALPHABET[c & 0x1F])
     return "".join(out)
+
+
+def base32_length(size: int) -> int:
+    """How many base-32 digits encode ``size`` bytes."""
+    return (size * 8 - 1) // 5 + 1
+
+
+def base32_decode(text: str, size: int) -> bytes:
+    """The inverse of :func:`base32`.
+
+    Needed because real fixed-output derivations write their hash in base-32
+    (or SRI) and the outputs tuple carries it as hex, so an implementation
+    that cannot decode cannot reproduce the bytes. ``size`` is the expected
+    digest length, which the encoding does not carry.
+
+    Verified as the inverse on the 19 base-32 hashes in the real corpus, and
+    property-tested against :func:`base32` for arbitrary bytes.
+    """
+    if len(text) != base32_length(size):
+        raise ValueError(
+            f"expected {base32_length(size)} digits, got {len(text)}"
+        )
+    out = bytearray(size)
+    for n, c in enumerate(reversed(text)):
+        digit = BASE32_ALPHABET.find(c)
+        if digit < 0:
+            raise ValueError(f"not a Nix base-32 digit: {c!r}")
+        bit = n * 5
+        idx, offset = bit // 8, bit % 8
+        out[idx] |= (digit << offset) & 0xFF
+        carry = digit >> (8 - offset)
+        if idx + 1 < size:
+            out[idx + 1] |= carry
+        elif carry:
+            raise ValueError("base-32 digits overflow the digest length")
+    return bytes(out)
 
 
 def compress(h: bytes, size: int = 20) -> bytes:

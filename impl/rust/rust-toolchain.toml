@@ -1,0 +1,5 @@
+# Pinned in step with RS_IMAGE in scripts/pins.env. A version moves in its own
+# commit, with both lines in the diff, exactly as the Nix oracle does.
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]

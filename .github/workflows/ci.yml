@@ -49,6 +49,44 @@ jobs:
       - run: make python-test
       - run: make python-build
 
+  rust:
+    name: rust lint, clippy and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # rustfmt, clippy with -D warnings, and the test suite, all in the
+      # pinned image. No dtolnay/rust-toolchain: the toolchain is the image.
+      - run: make rust-lint
+      - run: make rust-test
+      - run: make rust-build
+
+  go:
+    name: go vet, fmt and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # gofmt, go vet and the race detector, all in the pinned image. No
+      # actions/setup-go: the toolchain is the image.
+      - run: make go-lint
+      - run: make go-test
+      - run: make go-build
+
+  conformance:
+    name: conformance across implementations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # THE experiment. Both eDSLs describe the same ten intents; the bytes
+      # are diffed against each other AND against what real Nix emitted, so
+      # two implementations agreeing on the wrong answer still fails.
+      - run: make conformance
+
   corpus:
     name: random real nixpkgs derivations
     runs-on: ubuntu-latest

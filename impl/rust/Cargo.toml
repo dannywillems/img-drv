@@ -1,0 +1,30 @@
+[package]
+name = "img-drv"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+description = "A portable, content-addressed IR for reproducible build descriptions"
+readme = "README.md"
+license = "MPL-2.0"
+repository = "https://github.com/dannywillems/img-drv"
+keywords = ["reproducible-builds", "nix", "derivation", "build-system"]
+categories = ["development-tools::build-utils"]
+# Explicit include list, never an exclude: a new top-level file ships only when
+# someone adds it deliberately.
+include = ["src/**/*.rs", "Cargo.toml", "README.md", "LICENSE"]
+
+[dependencies]
+# The only runtime dependency. The Python reference has none, because hashing
+# is in its standard library; this is the same decision, not a looser one.
+sha2 = "0.10.9"
+
+[dev-dependencies]
+proptest = "1.9"
+
+[lib]
+name = "img_drv"
+path = "src/lib.rs"
+
+[[bin]]
+name = "img-drv"
+path = "src/bin/img-drv.rs"

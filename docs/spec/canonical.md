@@ -48,6 +48,20 @@ appears in `env` exactly as written, but in the outputs tuple as 64 lowercase
 hex characters ([`examples/fixed.drv`](examples/fixed.drv)). So the hash is
 decoded from whatever representation was supplied and re-encoded as hex.
 
+Precisely, verified on all 93 fixed-output derivations in the real corpus:
+
+```
+hash     = hex(decode(env.outputHash))
+hashAlgo = ("r:" if env.outputHashMode == "recursive" else "") + algo
+algo     = env.outputHashAlgo, or the prefix of an SRI outputHash when absent
+```
+
+`decode` accepts hex, Nix base-32, base-64, and SRI (`<algo>-<base64>`). The
+corpus exercises SRI (74) and base-32 (19); none of the real ones were written
+in hex, so an implementation that only accepts hex parses nothing real. The
+`r:` prefix is what selects the entirely different path scheme documented in
+[`store-paths.md`](store-paths.md).
+
 ### 1.2 inputDrvs
 
 A list of pairs:
@@ -60,8 +74,18 @@ The derivations this one depends on, each with the output names actually
 needed. Verified in [`examples/dependent.drv`](examples/dependent.drv):
 `[("/nix/store/...-dep-a.drv",["out"])]`.
 
-OPEN: the sort order of this list, and of the inner output-name list, when
-there is more than one entry.
+**Sorted by drvPath, ascending, and the inner output-name list is sorted
+ascending too.** Measured over the real corpus: 1293 of 1293 derivations have
+their `inputDrvs` in path order, and 9983 of 9983 inner name lists are sorted.
+Paths are unique within the list: 1293 of 1293.
+
+Independent of use order, which is what makes it a canonicalization rather than
+a coincidence: [`examples/many.drv`](examples/many.drv) lists `aaa`, `zzz`,
+`mmm` by path while its `args` reference them as `zzz`, `aaa`, `mmm`.
+
+Do not confuse this with the order of the HASHED form, which re-sorts the same
+list by each input's hash. One derivation, two orderings; see
+[`store-paths.md`](store-paths.md).
 
 ### 1.3 inputSrcs
 
@@ -69,7 +93,7 @@ A list of store paths used directly as sources, not produced by a derivation.
 Verified: passing a path literal produces
 `["/nix/store/8bznhhm6dlj274in8lqs9av03bg1xdab-src.txt"]`.
 
-OPEN: sort order with more than one entry.
+**Sorted ascending**: 1293 of 1293 in the real corpus.
 
 ### 1.4 system, builder
 
@@ -90,6 +114,55 @@ discarded.
 
 Note that the derivation's own outputs appear in `env` as well, one variable
 per output name.
+
+### 1.7 Which env entries are synthesized
+
+An eDSL does not receive `env` verbatim: some entries are derived from the
+other fields, and an implementation that omits them emits a different
+derivation. Measured over the 1293 corpus derivations that use the
+one-variable-per-attribute encoding (see section 1.8):
+
+| entry | rule | verified |
+| --- | --- | --- |
+| `name` | the derivation name | 1293 of 1293 |
+| `system` | equals the `system` field | 1293 of 1293 |
+| `builder` | equals the `builder` field | 1293 of 1293 |
+| one per output name | equals that output's path | 2310 of 2310 |
+| `outputs` | present **iff the caller declared outputs**, in DECLARATION order, space separated | see below |
+
+`args` is **not** mirrored into `env`: 1293 of 1293.
+
+The `outputs` entry is the subtle one, and the rule is not "present when there
+is more than one output". It is present exactly when the caller wrote an
+`outputs` attribute at all, because Nix turns that attribute into an env
+variable like any other. Of the 1197 corpus derivations that declare it, 605
+declare a single `out`; 96 single-output derivations omit it entirely, which is
+what a bare `derivation { ... }` with no `outputs` attribute produces
+([`examples/hello.drv`](examples/hello.drv)).
+
+So an implementation needs `outputs` to be an OPTION, not a list with a
+default. Modelling it as "defaults to `["out"]`" makes `hello.drv`
+unreproducible; modelling it as "emit when longer than one" makes the 605
+single-output nixpkgs derivations unreproducible.
+
+Its order is the caller's, not the sorted order of the outputs list: they
+differ in 575 of 1197 corpus cases, so this is a rule real packages exercise
+constantly rather than a curiosity of `multi.drv`.
+
+For a fixed-output derivation, `outputHash` and `outputHashMode` are always
+present (93 of 93) and `outputHashAlgo` usually is (82 of 93; it is omitted
+when the algorithm is already carried by an SRI-format `outputHash`).
+
+### 1.8 A second env encoding: `__structuredAttrs`
+
+1223 of the 2516 real derivations in the corpus do not use the encoding above
+at all. They carry a single `("__json", "{...}")` entry holding every attribute
+as JSON, and consequently have no `name`, `builder` or `system` env variable.
+
+This is `__structuredAttrs = true`, now the nixpkgs default for many builders.
+It is a genuinely different serialization of the same information and it is
+**not yet specified here**, which is a real limit on what the eDSL can express:
+see `PLAN.md`.
 
 ## 2. String escaping
 
@@ -119,10 +192,12 @@ they round-trip.
 ## 3. What is NOT yet specified
 
 Store path computation, which used to be the blocker here, is solved and
-verified: see [`store-paths.md`](store-paths.md). What remains open:
+verified: see [`store-paths.md`](store-paths.md). The sort order of `inputDrvs`
+and `inputSrcs` is now measured rather than open (sections 1.2 and 1.3). What
+remains open:
 
-- the sort order of `inputDrvs` and `inputSrcs` when there is more than one
-  entry, which has not been pinned down independently of observation;
+- `__structuredAttrs`, the second env encoding, used by 1223 of the 2516 real
+  derivations in the corpus (section 1.8);
 - NAR serialization, needed for `inputSrcs` computed from local files rather
   than referenced by path;
 - whether non-UTF-8 byte sequences are permitted in values, and round-trip.

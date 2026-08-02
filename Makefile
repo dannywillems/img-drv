@@ -15,21 +15,20 @@ help: ## Ask for help!
 
 .PHONY: conformance
 conformance: ## Assert every eDSL emits byte-identical IR (the whole point)
-	@echo "not implemented: see PLAN.md phase 2"
-	@exit 1
+	./scripts/conformance.sh
 
 .PHONY: differential
 differential: ## Recompute a real Nix closure's store paths and compare
 	./scripts/differential.sh
 
 .PHONY: build
-build: python-build ## Build every implementation
+build: python-build rust-build go-build ## Build every implementation
 
 .PHONY: test
-test: python-test ## Run every test suite
+test: python-test rust-test go-test ## Run every test suite
 
 .PHONY: lint
-lint: python-lint lint-shell ## Run every linter
+lint: python-lint rust-lint go-lint lint-shell ## Run every linter
 
 .PHONY: python-test
 python-test: ## Test the Python implementation
@@ -43,9 +42,35 @@ python-lint: ## Lint and type-check the Python implementation
 python-build: ## Build the Python wheel and sdist
 	./scripts/py-build.sh
 
+.PHONY: rust-test
+rust-test: ## Test the Rust implementation
+	./scripts/rs-check.sh test
+
+.PHONY: rust-lint
+rust-lint: ## Lint and check formatting of the Rust implementation
+	./scripts/rs-check.sh lint
+
+.PHONY: rust-build
+rust-build: ## Build the Rust crate in release mode
+	./scripts/rs-check.sh build
+
+.PHONY: go-test
+go-test: ## Test the Go implementation
+	./scripts/go-check.sh test
+
+.PHONY: go-lint
+go-lint: ## gofmt and go vet the Go implementation
+	./scripts/go-check.sh lint
+
+.PHONY: go-build
+go-build: ## Build the Go implementation
+	./scripts/go-check.sh build
+
 .PHONY: format
 format: ## Format code
 	./scripts/py-check.sh format
+	./scripts/rs-check.sh format
+	./scripts/go-check.sh format
 
 .PHONY: clean
 clean: ## Remove build artifacts
@@ -59,6 +84,10 @@ spec-check: ## Recompute every golden store path from derivation text alone
 .PHONY: aterm-roundtrip
 aterm-roundtrip: ## Parse then re-serialize every .drv; must be byte-identical
 	./scripts/py.sh roundtrip $(DIR)
+
+.PHONY: canonical-check
+canonical-check: ## Canonicalizing a real derivation must change nothing
+	./scripts/py.sh canonical $(DIR)
 
 .PHONY: corpus
 corpus: ## Pull N random nixpkgs packages and verify against them (needs docker)

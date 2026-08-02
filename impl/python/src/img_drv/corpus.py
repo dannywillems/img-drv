@@ -6,10 +6,14 @@ verification linear in the number of edges rather than exponential in depth,
 and it is correct because a derivation is immutable and its hash depends only
 on its transitive inputs.
 
-Structurally this is a fold over a DAG, in the standard order-theoretic sense:
-:meth:`Corpus.input_hash` is the unique homomorphism from the derivation DAG
-into the monoid of digests induced by the hash function. Uniqueness is why
-every implementation of this specification must agree.
+Structurally this is a fold over a DAG. :meth:`Corpus.input_hash` is defined by
+WELL-FOUNDED recursion: the graph is finite and acyclic, so the recursion
+terminates and picks out exactly one function, which is why every conforming
+implementation in any language must produce the same digests.
+
+(An earlier version of this docstring called it a homomorphism into "the monoid
+of digests". That was an over-claim: digests carry no associative operation for
+it to be a homomorphism of. See ``docs/abstractions.md`` entry 2.)
 """
 
 from __future__ import annotations

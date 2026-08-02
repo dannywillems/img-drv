@@ -162,9 +162,12 @@ hundred real ones contains it by accident.
 
 ## Still open
 
-- [ ] Sort order of `inputDrvs` when there is more than one entry. The map is
-      keyed by the input HASH, not the path, so the order is by hash and
-      changes as inputs change.
+- [x] Sort order of `inputDrvs` when there is more than one entry. Settled, and
+      it is two rules rather than one: the serialized `.drv` sorts by store
+      PATH (1293 of 1293 real derivations, `canonical.md` section 1.2), while
+      the form that gets HASHED re-sorts the same list by each input's hash.
+      A textual substitution preserves path order and so silently breaks every
+      derivation with more than one input.
 - [ ] `source` paths: NAR serialization and recursive hashing, needed for
       `inputSrcs` computed from local files rather than referenced by path.
 - [ ] Whether any of this shifts in newer Nix versions, which is the reason to

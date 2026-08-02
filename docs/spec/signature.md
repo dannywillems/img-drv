@@ -34,7 +34,8 @@ derivation :
   , builder : String
   , args    : [String]
   , env     : [(String, String)]
-  , outputs : [OutputName]              -- declaration order is significant
+  , outputs : Option [OutputName]       -- declaration order is significant,
+                                        -- and ABSENT differs from ["out"]
   , inputDrvs : [(DrvRef, [OutputName])]
   , inputSrcs : [StorePath]
   , fixedOutput : Option (HashAlgo, String)
@@ -56,10 +57,18 @@ To be enforced by every implementation, and property-tested:
    insertion order and break the quotient in `theory.md` section 4.
 4. `name` must be a valid store path name.
 5. A fixed-output derivation has exactly one output.
-6. The derivation's own outputs appear as env variables, and the `outputs` env
-   variable lists the output names in DECLARATION order, space separated,
-   while the serialised outputs list is sorted by name. Both are observable in
-   [`examples/multi.drv`](examples/multi.drv).
+6. The derivation's own outputs appear as env variables, one per output name,
+   holding that output's path.
+7. `outputs` is an OPTION, and the two cases are distinguishable in the bytes:
+   when present, an `outputs` env variable lists the names in DECLARATION
+   order, space separated, while the serialised outputs list is sorted by name
+   ([`examples/multi.drv`](examples/multi.drv)); when absent, there is no such
+   variable and the single output is `out`
+   ([`examples/hello.drv`](examples/hello.drv)). `Some ["out"]` and `None` are
+   therefore different derivations with different store paths, and both occur
+   in real nixpkgs. See `canonical.md` section 1.7 for the counts.
+8. `system` and `builder` appear as env variables equal to their own fields,
+   and `args` does not appear in env at all.
 
 ## What is deliberately not here
 
@@ -71,10 +80,17 @@ To be enforced by every implementation, and property-tested:
 
 ## Open
 
-- [ ] Exact validity rules for `name` as a store path component.
-- [ ] Whether to model `env` as a list of pairs (order discarded on
-      serialization, uniqueness enforced) or as a map in the host language.
-      A map is friendlier; a list is closer to the wire. Leaning map, with
-      sorting at serialization time, because it makes invariant 3 free.
-- [ ] Multi-output `DrvRef`: whether the outputs needed belong to the
-      reference or to the edge.
+- [ ] Exact validity rules for `name` as a store path component. The predicate
+      currently enforced (non-empty, at most 211 characters, not `.` or `..`,
+      no leading `.`, characters drawn from `[A-Za-z0-9+._?=-]`) accepts every
+      name in the real corpus, which shows it is not too strict but not that it
+      is not too permissive.
+- [x] `env` is a MAP in the host language, sorted at serialization time. That
+      makes invariant 3 free rather than a check, and the wire order is
+      recovered by sorting, so nothing is lost.
+- [x] The outputs needed belong to the EDGE, not to the reference: depending on
+      `dev` alone is common, and two dependents of the same derivation
+      routinely need different outputs.
+- [ ] `__structuredAttrs`: the second env encoding (`canonical.md` section
+      1.8), which 1223 of 2516 real derivations use and this signature cannot
+      currently express.

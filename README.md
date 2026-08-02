@@ -3,8 +3,8 @@
 A portable, content-addressed **intermediate representation for reproducible
 build descriptions**, with thin embedded DSLs in **Go, OCaml, Rust and Python**.
 
-Nothing is built yet. This repository currently holds a thesis, a plan to
-falsify it cheaply, and the mathematics that constrains the design.
+Three of the four exist, and the falsification test has come back negative.
+See [Status](#status).
 
 ## The thesis
 
@@ -85,16 +85,35 @@ pinned. See [`PLAN.md`](PLAN.md#engineering-baseline-runs-alongside-every-phase)
 ```
 PLAN.md                 the living plan, and where tasks come from
 docs/theory.md          why finite products suffice, and what that forces
+docs/abstractions.md    which structure each piece of code realizes, its
+                        laws, and where each law is tested
 docs/nix-internals.md   how Nix actually works, with sources
 docs/learning-nix.md    a path to learning Nix properly, in order
 docs/spec/              the IR signature and canonical serialization,
                         with golden .drv files from real Nix
+impl/python/            the reference implementation, as a library
+impl/rust/              the second implementation, as a crate
+impl/go/                the falsification test, as a module
 ```
 
 ## Status
 
-Planning. See [`PLAN.md`](PLAN.md). Phase 0 to 2 are weeks of work and
-either validate the thesis or kill it; nothing beyond that is committed to.
+Three of the four implementations exist, and the experiment runs. `make
+conformance` has the Python, Rust and Go eDSLs describe the same ten intents and
+diffs the bytes every way: against each other, and each against derivations real
+Nix emitted. Currently **10 intents, 3 implementations, byte-identical to Nix**,
+including each derivation's own `.drv` store path.
+
+**The falsification test came back negative.** Go was the one most likely to
+refute the thesis, and the signature needed nothing beyond finite products
+there: four generic functions, all of the weak "identical body per type" kind,
+and nothing wanting a higher-kinded type or a type class. What Go costs is
+ENFORCEMENT and UNIFORMITY rather than expressiveness (a finite sum becomes a
+string type that accepts any string; `Option` acquires three different
+spellings), and the full tally is in
+[`impl/go/README.md`](impl/go/README.md).
+
+OCaml is the one left. See [`PLAN.md`](PLAN.md).
 
 ## Licence
 

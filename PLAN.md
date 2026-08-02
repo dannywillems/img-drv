@@ -20,18 +20,18 @@ How it is used:
 
 Ordered. The top item is the next thing to do.
 
-1. **Build the Python eDSL surface** on top of the library that now exists:
-   the first-order signature from `docs/spec/signature.md` as a typed builder
-   API, so a build can be DESCRIBED rather than only parsed. This is the first
-   half of the thesis test; until it exists there is nothing to compare across
-   languages.
-2. **Port to Rust**, as a reusable crate mirroring the Python public surface.
-   Second language means the conformance target stops being vacuous.
-3. **Make `make conformance` real**: assert Python and Rust emit byte-identical
-   IR for the same intent. This is the experiment the whole project is a bet
-   on, and it can now fail honestly.
-4. **Then Go and OCaml**, in that order, each a reusable library.
-5. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
+1. **OCaml**, the typed reference, with abstract types in `.mli` files. The
+   last of the four, and the only one left that could still surprise us: it is
+   the one language where the signature could be made unrepresentably wrong
+   rather than merely checked.
+2. **Describe `scripts/probe.nix` in the eDSL** so `make differential` becomes
+   a LIVE oracle for the eDSL rather than only for the parser. The ten golden
+   examples already pin the eDSL against real Nix, but they are checked-in
+   files; the probe runs against a real `nix-instantiate` on every push.
+3. **`__structuredAttrs`**, the second env encoding, which 1223 of the 2516
+   real derivations in the corpus use (`docs/spec/canonical.md` section 1.8).
+   Until it is specified the eDSL cannot express a modern nixpkgs package.
+4. **NAR serialization and `inputSrcs`**, the last unspecified corner of the
    format (`docs/spec/canonical.md` section 3).
 
 ## State
@@ -58,9 +58,28 @@ Ordered. The top item is the next thing to do.
 - [x] **Python library** (`impl/python/`): the verified reference, as a typed,
       packaged, semver'd library. `mypy --strict` clean, 32 tests including
       property-based ones, wheel and sdist build.
-- [ ] An eDSL surface in any language: nothing yet DESCRIBES a build, it can
-      only read and hash one.
-- [ ] A second implementation, without which `make conformance` is vacuous.
+- [x] **The Python eDSL surface** (`impl/python/src/img_drv/edsl.py`). All ten
+      golden examples reproduced BYTE-IDENTICALLY from intent, including each
+      derivation's own `.drv` store path. The laws are property-tested with
+      Hypothesis over generated intents, not examples.
+- [x] The canonical form shown to be NIX's rather than ours: canonicalizing is
+      the identity on 2516 of 2516 real derivations, and `make corpus` now
+      gates it on a fresh random sample.
+- [x] **A second implementation** (`impl/rust/`): a reusable crate,
+      `deny(warnings)`, newtypes, enums for the sums, no `unwrap` outside
+      tests, 41 tests including the same property-based laws as Python.
+- [x] **`make conformance` is real, and has been seen to FAIL.** 10 intents, 2
+      implementations, byte-identical to each other AND to what real Nix
+      emitted. Sabotaging one ordering rule moves a store path and the target
+      reports which implementation stopped matching Nix.
+- [x] **Go, the falsification test, came back NEGATIVE** (`impl/go/`). The
+      signature needed nothing beyond finite products; four generic functions,
+      all of the weak kind. What Go costs is enforcement and uniformity, not
+      expressiveness, and the tally is in `impl/go/README.md`.
+- [x] **`make conformance` across THREE implementations**: 10 intents, Python,
+      Rust and Go, byte-identical to each other and to real Nix.
+- [ ] `__structuredAttrs`, without which the eDSL cannot express a modern
+      nixpkgs package.
 
 ---
 
@@ -93,13 +112,14 @@ Deliverable: `docs/spec/`, versioned, normative.
       EMPIRICALLY from real Nix rather than guessed, and recorded with the
       probes that established each rule. See `docs/spec/canonical.md`.
 - [x] Golden files from real Nix for five cases. See `docs/spec/examples/`.
-- [ ] **The hash. STILL OPEN, and it blocks Phase 1.** Store path computation
-      (the `output:out:sha256:...` fingerprint and Nix's base-32 encoding) is
-      not yet verified. Until it is, an implementation can emit a derivation
-      with the right shape and wrong paths, which looks correct and is not.
+- [x] **The hash.** Store path computation (the `output:out:sha256:...`
+      fingerprint and Nix's base-32 encoding) verified against real
+      derivations: 1259 of 1259 output paths across 805 real nixpkgs
+      derivations, plus 12 of 12 golden examples. See `docs/spec/store-paths.md`.
+      This was the Phase 1 blocker, and it is closed.
 
 Exit test: a human can serialize the worked example with a pencil and get the
-documented bytes. Currently reachable for everything EXCEPT the store paths.
+documented bytes. Reachable, including the store paths.
 
 ## Phase 1: Python first, then OCaml, and a real build (1 to 2 weeks)
 
@@ -110,11 +130,12 @@ serializer should read like `canonical.md`.
 OCaml second, as the typed reference, because sum types and exhaustiveness are
 what make the normalizer honest once the rules have stopped changing.
 
-- [ ] eDSL producing the IR value, fully typed (`mypy --strict` clean).
-- [ ] Canonical serializer.
-- [ ] ATerm emitter producing a `.drv`.
-- [ ] `ci.yml` running the Python jobs through Makefile targets.
-- [ ] `impl/python/README.md` and the first real-world example.
+- [x] eDSL producing the IR value, fully typed (`mypy --strict` clean).
+- [x] Canonical serializer, shown to be the identity on real Nix output.
+- [x] ATerm emitter producing a `.drv`.
+- [x] `ci.yml` running the Python jobs through Makefile targets.
+- [x] `impl/python/README.md`.
+- [ ] The first real-world example (needs `__structuredAttrs`).
 - [ ] Hand it to an existing Nix store and build something trivial.
 - [ ] **Differential oracle**: the same package written in the Nix language,
       instantiated with `nix-instantiate`, compared byte-for-byte with ours.
@@ -133,14 +154,19 @@ Go (weak static), Rust (strong static), OCaml (strong static with inference).
 If all four agree byte for byte, the portability claim is as well supported as
 this kind of claim can be.
 
-- [ ] Golden-file conformance suite: a set of intents, each with its expected
-      canonical bytes and hash, language-independent. Seeded by
-      `docs/spec/examples/`, which already holds five cases from real Nix.
-- [ ] Rust eDSL passing it, `deny(warnings)`, newtypes, no `unwrap`.
-- [ ] Go eDSL passing it, no `any` in the signature.
-- [ ] CI matrix covering all four pinned toolchains.
-- [ ] Per-language docs, and the typing table recording which invariants each
-      type system makes unrepresentable.
+- [x] Golden-file conformance suite: a set of intents, each with its expected
+      canonical bytes and hash. Lives in each implementation as an `examples`
+      module so that the tests, the `examples` CLI command and
+      `make conformance` all consume the SAME ten intents.
+- [x] Rust eDSL passing it, `deny(warnings)`, newtypes, no `unwrap`.
+- [x] Go eDSL passing it, no `any` in the signature. The only `reflect` in the
+      implementation is in its property-test generator, which stdlib
+      `testing/quick` forces.
+- [ ] CI matrix covering all four pinned toolchains. Python, Rust and Go done.
+- [x] Per-language docs, and the typing table recording which invariants each
+      type system makes unrepresentable (`impl/rust/README.md`). The first
+      result: a stronger type system removes the checks you make on values you
+      CONSTRUCT, and none of the checks on values you COMPUTE.
 - [ ] The six real-world examples, in all four languages, byte-identical.
 
 Go is the **falsification test**, not a fourth port. It has no sum types, no
@@ -318,23 +344,30 @@ This is arguably the most reusable idea in NixOS and nobody has extracted it.
 
 ## Open questions
 
-- **Licence.** GPL-3.0 as requested. Note the tension: the stated goal is that
-  people embed these eDSLs in their own stacks, and strong copyleft on a
-  library is a real adoption barrier, which is why libraries in this space
-  usually pick LGPL, MPL-2.0 or Apache-2.0. Resolve deliberately. Whatever is
-  chosen, decide BEFORE anyone else contributes, because relicensing later
-  needs every contributor's agreement.
-- **Which Nix version is the oracle**, and is its `.drv` output byte-stable
-  across releases?
 - **Daemon protocol or files?** Write `.drv` into the store and call
   `nix-store --realise`, or speak the daemon protocol directly. Files first.
+- **`__structuredAttrs`.** 1223 of 2516 real derivations in the corpus collapse
+  their whole env into a single `__json` entry instead of one variable per
+  attribute. That is a second env encoding, and the eDSL does not emit it. It
+  has to be specified before the eDSL can express a modern nixpkgs package.
 - **Name.** `img-drv` says "image derivation". If the artifact layer turns out
   to be general rather than image-specific, revisit.
+
+Resolved, kept here only so the resolution is findable:
+
+- ~~**Licence.**~~ MPL-2.0 for code, CC0-1.0 for `docs/spec/`
+  (`docs/decisions/2026-08-01-licence-mpl-2.0.md`).
+- ~~**Which Nix version is the oracle**, and is it byte-stable?~~ `nixos/nix`
+  2.35.1, pinned BY DIGEST in `scripts/pins.env`. Byte-stability measured
+  across 2.34.8 and 2.35.1 rather than assumed.
 
 ## How this repository is kept
 
 - `docs/theory.md` is normative: design choices must trace back to it, or be
   labelled preferences.
+- `docs/abstractions.md` is the running record of which structure each piece of
+  the implementation realizes, its laws, and where each law is tested. A
+  feature larger than a refactor adds an entry in the same commit.
 - `docs/spec/` is versioned. Changing canonical bytes is a breaking change and
   gets a version bump.
 - Decisions that would otherwise be re-litigated get a file under
@@ -344,6 +377,76 @@ This is arguably the most reusable idea in NixOS and nobody has extracted it.
 ---
 
 ## Plan log
+
+- **2026-08-02** Go landed, and the falsification test came back NEGATIVE: the
+  first-order signature needed nothing beyond finite products, and three
+  implementations now emit byte-identical IR for the same ten intents,
+  byte-identical to real Nix. `theory.md` section 1 survived the test it was
+  most likely to fail.
+
+  The honest cost is in ENFORCEMENT, not expressiveness. A finite sum becomes a
+  defined string type that accepts any string, so `HashAlgo("sha3")` compiles;
+  `Option` has no single spelling, so one concept became three encodings; and
+  structural equality is hand-written because a struct holding a slice is not
+  comparable. Roughly 2x Python's line count, almost none of it about the
+  signature.
+
+  The finding that would have been a BUG rather than bulk: the obvious Go
+  encoding of `outputs` is a nil slice for "not declared", and Go deliberately
+  makes nil and empty slices behave alike, so the one distinction the bytes
+  depend on is the one the language encourages you to ignore. An explicit
+  discriminant is the only safe encoding.
+
+  Go is also BETTER in two places worth recording: randomised map iteration
+  turns a missing sort from a silent bug into a flaky one, so the determinism
+  law is a real test here and nearly vacuous elsewhere; and Go defines
+  over-wide shifts as zero, so the release-only `base32` bug the Rust port hit
+  cannot occur. See `docs/abstractions.md` entry 7 and `impl/go/README.md`.
+
+- **2026-08-02** Rust port landed, and `make conformance` is real: 10 intents,
+  2 implementations, byte-identical to each other AND to what real Nix
+  emitted. The three-way diff is deliberate, since two implementations
+  agreeing on the wrong bytes would pass a two-way one. The target was then
+  SABOTAGED to check it can fail: emitting the `outputs` env variable sorted
+  instead of in declaration order moves `multi` from `v27a4...` to `hm669...`
+  and conformance names Rust as the implementation that stopped matching Nix.
+
+  Porting found a bug testing one implementation never would: `base32` shifts
+  a `u8` by `8 - offset`, which is a shift by 8 when `offset` is 0. Python is
+  correct without a guard because its integers are unbounded; Rust PANICS in
+  debug and silently MASKS the shift to 0 in release. The release build was
+  clean. A release-only wrong answer inside a hash function is the worst
+  available failure mode.
+
+  First entry in the typing table: Rust turns three of Python's runtime checks
+  into compile-time impossibilities and one property test into a non-property
+  (`BTreeMap` has no insertion order to leak), and turns NONE of the checks
+  that compare a value against computed data. Those need a checker rather than
+  a type, in any language. Recorded in `impl/rust/README.md` and
+  `docs/abstractions.md` entry 6.
+
+- **2026-08-02** The Python eDSL surface landed: a build can now be DESCRIBED,
+  not only read. Every one of the ten golden examples is reproduced
+  byte-identically from intent, including its own `.drv` store path, so the
+  eDSL is pinned against real Nix rather than against our own reader. Three
+  rules had to be established from the corpus first, because the two golden
+  files that exercise them do not distinguish the alternatives: `inputDrvs` is
+  sorted by store PATH with each inner name list sorted (1293 of 1293 real
+  derivations, 9983 of 9983 inner lists), `inputSrcs` ascending (1293 of 1293),
+  and the fixed-output `hashAlgo`/`hash` re-encoding (93 of 93). All three were
+  OPEN in `canonical.md` and are now measured.
+
+  The finding that changed the API: `outputs` is an OPTION, not a list
+  defaulting to `["out"]`. Nix emits an `outputs` env variable exactly when the
+  caller DECLARED the attribute, so `None` and `["out"]` are different
+  derivations with different store paths, and 96 single-output derivations in
+  the corpus do the first while 605 do the second. Modelling it either way as a
+  default makes one of the two unreproducible.
+
+  Also found: 1223 of the 2516 corpus derivations use `__structuredAttrs`,
+  collapsing the whole env into one `__json` entry. That is a second env
+  encoding, it is not specified, and it is why "the first real-world example"
+  is not simply the next task.
 
 - **2026-08-01** Oracle pinned to `nixos/nix:2.35.1` BY DIGEST. Byte-stability
   measured, not assumed: 2.34.8 and 2.35.1 emit byte-identical derivations for

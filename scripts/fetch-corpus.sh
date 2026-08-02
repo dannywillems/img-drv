@@ -65,3 +65,9 @@ echo ">> round-trip check (parse then serialize must be byte-identical)"
 
 echo ">> store path check"
 "$HERE/py.sh" verify "$REL"
+
+# The eDSL emits CANONICAL bytes, so each ordering rule it applies is a claim
+# about Nix. Checking it here means a fresh random sample gets a vote on that
+# claim, rather than only the ten examples checked into docs/spec.
+echo ">> canonical form check (canonicalizing real derivations must be a no-op)"
+"$HERE/py.sh" canonical "$REL"

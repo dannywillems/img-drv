@@ -1,0 +1,141 @@
+"""The conformance corpus: intents, and the bytes real Nix produced for them.
+
+This is the language-independent set `PLAN.md` phase 2 asks for. Each entry is
+an INTENT expressed through the eDSL, paired with the name of the golden file
+in ``docs/spec/examples/`` that real Nix emitted for the same intent.
+
+It lives in the library rather than in the tests because three different things
+consume it: the test suite, the ``examples`` CLI command, and `make
+conformance`, which diffs what Python emits against what Rust emits against
+what Nix emitted. A corpus that only the tests could see could not do the
+last two.
+
+Every implementation in every language carries the same ten intents. That is
+what makes "byte-identical across four languages" a claim that can fail.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+
+from .edsl import Drv, FixedOutput, derivation
+
+__all__ = ["CORPUS", "SH", "SYSTEM"]
+
+#: Every example targets one system, so the corpus is comparable across
+#: machines: a derivation's store path depends on its system.
+SYSTEM = "x86_64-linux"
+SH = "/bin/sh"
+
+
+def _echo(name: str, word: str) -> Drv:
+    """The shape shared by most of the golden examples."""
+    return derivation(
+        name=name,
+        system=SYSTEM,
+        builder=SH,
+        args=["-c", f"echo {word} > $out"],
+    )
+
+
+def hello() -> Drv:
+    """The smallest real derivation: one output, no dependencies."""
+    return _echo("hello", "hi")
+
+
+def aaa() -> Drv:
+    """One of three leaves used to exercise multi-entry `inputDrvs`."""
+    return _echo("aaa", "aaa")
+
+
+def mmm() -> Drv:
+    """One of three leaves used to exercise multi-entry `inputDrvs`."""
+    return _echo("mmm", "mmm")
+
+
+def zzz() -> Drv:
+    """One of three leaves used to exercise multi-entry `inputDrvs`."""
+    return _echo("zzz", "zzz")
+
+
+def dep_a() -> Drv:
+    """The dependency of `dependent`, and a reconstruction target itself."""
+    return _echo("dep-a", "a")
+
+
+def dependent() -> Drv:
+    """One edge, which is what pins the mask/do-not-mask asymmetry."""
+    a = dep_a()
+    return derivation(
+        name="dependent",
+        system=SYSTEM,
+        builder=SH,
+        args=["-c", f"cat {a.output()} > $out"],
+        input_drvs=[a],
+    )
+
+
+def many() -> Drv:
+    """Three edges, named in an order that is NOT their store-path order.
+
+    That is what makes this example evidence: `inputDrvs` has to come out
+    sorted by path regardless of the order the caller used them in.
+    """
+    a, m, z = aaa(), mmm(), zzz()
+    return derivation(
+        name="many",
+        system=SYSTEM,
+        builder=SH,
+        args=["-c", f"cat {z.output()} {a.output()} {m.output()} > $out"],
+        input_drvs=[z, a, m],
+    )
+
+
+def ordering() -> Drv:
+    """Env declared out of order, to pin that env is sorted by key."""
+    return derivation(
+        name="ordering",
+        system=SYSTEM,
+        builder=SH,
+        env={"zzz": "last-declared-first", "aaa": "first", "mmm": "middle"},
+    )
+
+
+def multi() -> Drv:
+    """Three outputs, which carries TWO orderings of the same list."""
+    return derivation(
+        name="multi",
+        system=SYSTEM,
+        builder=SH,
+        outputs=["out", "dev", "lib"],
+    )
+
+
+def fixed() -> Drv:
+    """A fixed-output derivation, with the hash written in base-32.
+
+    The outputs tuple must carry it re-encoded as hex while the env keeps it
+    exactly as written, which is the rule an implementation is most likely to
+    get wrong.
+    """
+    return derivation(
+        name="fixed",
+        system=SYSTEM,
+        builder=SH,
+        fixed_output=FixedOutput(hash="0" * 52, algo="sha256"),
+    )
+
+
+#: Golden file name -> the intent that must reproduce it byte for byte.
+CORPUS: Mapping[str, Callable[[], Drv]] = {
+    "34h63y306vjiqi9974m0abrkp8aplgjq-dependent.drv": dependent,
+    "3k9aahbip0dn0kb9m6i20sr2mjfmzsij-aaa.drv": aaa,
+    "6hjg3xda34qvj2vpw27girg51gpdyd19-fixed.drv": fixed,
+    "76w21n1f03fs5kw8fnffphx7qrqffw6r-hello.drv": hello,
+    "7v25018h9x5nc7sc0sv57ghaq2qa0j9n-zzz.drv": zzz,
+    "h3ik45ycljylpdzjssckqi3vvslsbxpn-many.drv": many,
+    "k1lc1y192xiajlyy4zvsdnfprnjx32i3-dep-a.drv": dep_a,
+    "mfdcxzh0v906c5hngb3x0b7sjl130hpk-ordering.drv": ordering,
+    "v27a425rg4n7prwzpyyw0y1fw2ssc46f-multi.drv": multi,
+    "vk8wqbqg3k8w4134kwa0392kbc1953aq-mmm.drv": mmm,
+}
